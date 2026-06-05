@@ -70,6 +70,20 @@ export function buildRenewalMessage(ctx: MessageContext = {}): string {
   ].filter(Boolean).join('\n')
 }
 
+export function buildAccessActivatedMessage(ctx: MessageContext = {}): string {
+  return [
+    'Acesso ativado com sucesso!',
+    '',
+    optional('Cliente', pick(ctx.cliente, ctx.clientName)),
+    optional('Plano', pick(ctx.plan, ctx.app)),
+    optional('Validade', ctx.vencimento),
+    optional('App', ctx.app),
+    optional('Painel', pick(ctx.painel, ctx.panel)),
+    '',
+    'Aproveite sua assinatura Central Play Plus.',
+  ].filter(Boolean).join('\n')
+}
+
 export function buildInstallMessage(ctx: MessageContext = {}): string {
   return buildInstallTemplate(
     pick(ctx.app, 'XCloud'),
@@ -152,6 +166,8 @@ export function buildFlowMessage(flow: FlowKey, ctx: MessageContext = {}): strin
       return buildTestCreatedMessage(ctx)
     case 'test_expired':
       return buildTestExpiredOperatorMessage(ctx)
+    case 'access_activated':
+      return buildAccessActivatedMessage(ctx)
     case 'renewal_created':
       return buildRenewalMessage(ctx)
     case 'install_requested':

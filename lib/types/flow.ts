@@ -6,6 +6,7 @@
 export const FLOW_KEYS = [
   'test_created',
   'test_expired',
+  'access_activated',
   'renewal_created',
   'install_requested',
   'app_swap',
@@ -75,6 +76,7 @@ export interface MessageContext {
 export const FLOW_REQUIRED_FIELDS: Record<FlowKey, (keyof MessageContext)[]> = {
   test_created: [],
   test_expired: [],
+  access_activated: [],
   renewal_created: [],
   install_requested: ['device'],
   app_swap: ['appNovo'],

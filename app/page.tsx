@@ -70,6 +70,21 @@ const FLOWS: Record<string, FlowConfig> = {
       { level: "info", code: "ACTION_REMOVE_XCLOUD", detail: "Remocao XCloud somente simulada" },
     ],
   ),
+  access_activated: flow(
+    "Acesso ativado",
+    "Preview: acesso ativado com sucesso, plano, validade e orientacoes.",
+    [
+      { state: "receiving", text: "Acesso ativado recebido", duration: 400 },
+      { state: "interpreting", text: "Conferindo plano e validade", duration: 500 },
+      { state: "preparing", text: "Preparando mensagem de ativacao", duration: 650 },
+      { state: "completed", text: "Preview de acesso ativado pronto", duration: 1800 },
+    ],
+    [
+      { level: "success", code: "ACCESS_ACTIVATED", detail: "Ativacao registrada" },
+      { level: "info", code: "PLAN_CONFIRMED", detail: "Plano e validade confirmados" },
+      { level: "success", code: "MESSAGE_READY", detail: "Mensagem pronta para envio" },
+    ],
+  ),
   renewal_created: flow(
     "Renovacao",
     "Preview: cobranca de renovacao com dados visuais e sem envio real.",
@@ -327,6 +342,7 @@ const FLOWS: Record<string, FlowConfig> = {
 const simulations = [
   { id: "test_created", label: "Teste criado", icon: <Sparkles className="w-4 h-4" /> },
   { id: "test_expired", label: "Teste expirado", icon: <Clock className="w-4 h-4" /> },
+  { id: "access_activated", label: "Acesso ativado", icon: <CheckCircle2 className="w-4 h-4" /> },
   { id: "renewal_created", label: "Renovacao", icon: <RefreshCw className="w-4 h-4" /> },
   { id: "app_swap", label: "Trocar app", icon: <Monitor className="w-4 h-4" /> },
   { id: "second_screen", label: "Segunda tela", icon: <BarChart3 className="w-4 h-4" /> },
@@ -363,6 +379,7 @@ const sidebarItems = [
   { id: "falhas", label: "Falhas", icon: AlertTriangle },
   { id: "console", label: "Console", icon: Terminal },
   { id: "historico", label: "Historico", icon: History },
+  { id: "config", label: "Config", icon: Settings },
 ]
 
 function JarvisPageContent() {
@@ -650,8 +667,8 @@ function JarvisPageContent() {
         <div className="floating-particle" style={{ top: '35%', left: '70%', animationDelay: '0.5s' }} />
       </div>
 
-      {/* Sidebar */}
-      <aside className="w-[200px] border-r border-primary/10 bg-gradient-to-b from-card/50 via-card/20 to-transparent backdrop-blur-md flex flex-col relative z-10">
+      {/* Sidebar - hidden on mobile, shown on md+ */}
+      <aside className="hidden md:flex w-[200px] border-r border-primary/10 bg-gradient-to-b from-card/50 via-card/20 to-transparent backdrop-blur-md flex-col relative z-10">
         <nav className="flex-1 p-3 space-y-1 pt-6">
           {sidebarItems.map((item) => {
             const Icon = item.icon
@@ -698,6 +715,37 @@ function JarvisPageContent() {
         </div>
       </aside>
 
+      {/* Mobile bottom nav */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden border-t border-border/30 bg-card/90 backdrop-blur-lg safe-bottom">
+        <nav className="flex items-center justify-around px-2 py-2">
+          {sidebarItems.map((item) => {
+            const Icon = item.icon
+            const isActiveTab = item.id === activeTab
+            const count = item.id === "falhas" ? failures.filter(f => !f.resolved).length : 0
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  "flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-all relative min-w-[60px]",
+                  isActiveTab 
+                    ? "bg-primary/15 text-primary" 
+                    : "text-muted-foreground"
+                )}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-[10px] font-medium">{item.label}</span>
+                {count > 0 && (
+                  <span className="absolute -top-1 -right-1 px-1.5 py-0.5 text-[9px] bg-destructive text-white rounded-full font-bold min-w-[18px] text-center">
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
+      </div>
+
       {/* Main content */}
       <div className="flex-1 flex flex-col relative z-10">
         {/* Header */}
@@ -734,8 +782,8 @@ function JarvisPageContent() {
           </div>
         </header>
 
-        {/* Main area */}
-        <main className="flex-1 overflow-auto">
+        {/* Main area - add bottom padding on mobile for bottom nav */}
+        <main className="flex-1 overflow-auto pb-20 md:pb-0">
           {activeTab === "central" && (
             <div className="h-full flex flex-col">
               {/* JARVIS Section */}
@@ -1010,7 +1058,7 @@ function JarvisPageContent() {
                             onChange={(event) => setEvolutionFlow(event.target.value)}
                             className="h-9 w-full rounded-lg border border-border/30 bg-background/50 px-3 text-xs text-foreground outline-none"
                           >
-                            {["test_created", "test_expired", "renewal_created", "install_requested", "app_swap", "second_screen", "problem_created"].map((flow) => (
+                            {["test_created", "test_expired", "access_activated", "renewal_created", "install_requested", "app_swap", "second_screen", "problem_created", "charge_customer", "xcloud_remove_device", "xcloud_recreate_device"].map((flow) => (
                               <option key={flow} value={flow}>{flow}</option>
                             ))}
                           </select>
@@ -1031,8 +1079,19 @@ function JarvisPageContent() {
                           </div>
                           {evolutionResult ? (
                             <div className="space-y-1 text-foreground/80">
-                              <p>{evolutionResult.code || "RESULT"} · {evolutionResult.message || "-"}</p>
-                              {evolutionResult.preview && <p className="line-clamp-2 text-primary/80">{evolutionResult.preview}</p>}
+                              <p className={cn(
+                                "font-semibold",
+                                evolutionResult.ok ? "text-chart-2" : "text-destructive"
+                              )}>{evolutionResult.code || "RESULT"} · {evolutionResult.message || "-"}</p>
+                              {evolutionResult.dryRun && (
+                                <p className="text-chart-3/80 text-[10px]">Dry-run ativo - nenhuma mensagem enviada</p>
+                              )}
+                              {evolutionResult.preview && (
+                                <div className="mt-2 p-2 rounded-lg bg-card/30 border border-border/20">
+                                  <p className="text-[10px] text-muted-foreground/50 mb-1">Preview da mensagem:</p>
+                                  <p className="whitespace-pre-wrap text-primary/90 leading-relaxed">{evolutionResult.preview}</p>
+                                </div>
+                              )}
                               {evolutionResult.logs?.slice(0, 2).map((entry, index) => (
                                 <p key={`${entry.code}-${index}`} className="text-muted-foreground/60">{entry.code}: {entry.message}</p>
                               ))}
@@ -1123,10 +1182,10 @@ function JarvisPageContent() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleSimulate(sim.id, sim.label)}
-                          className="h-10 px-4 gap-2 bg-card/50 border-border/30 hover:border-primary/30 hover:bg-primary/5 transition-all"
+                          className="h-12 sm:h-10 px-4 gap-2 bg-card/50 border-border/30 hover:border-primary/30 hover:bg-primary/5 transition-all text-sm"
                         >
                           <span className="text-primary/70">{sim.icon}</span>
-                          <span className="text-sm">{sim.label}</span>
+                          <span>{sim.label}</span>
                         </Button>
                       ))}
                     </div>
@@ -1315,6 +1374,179 @@ function JarvisPageContent() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Config Tab */}
+          {activeTab === "config" && (
+            <div className="p-8 max-w-[1000px] mx-auto">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Configuracoes</h2>
+                  <p className="text-sm text-muted-foreground/60 mt-1">Ajustes do sistema e Evolution</p>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {/* Status do Sistema */}
+                <div className="rounded-xl bg-card/40 border border-border/20 p-6">
+                  <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-primary" />
+                    Status do Sistema
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="p-4 rounded-lg bg-background/30 border border-border/20">
+                      <p className="text-xs text-muted-foreground/60 mb-1">Dry-run</p>
+                      <p className={cn(
+                        "font-semibold",
+                        evolutionResult?.flags?.dryRun !== false ? "text-chart-3" : "text-chart-2"
+                      )}>
+                        {evolutionResult?.flags?.dryRun !== false ? "Ativo (seguro)" : "Desativado (real)"}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-background/30 border border-border/20">
+                      <p className="text-xs text-muted-foreground/60 mb-1">Evolution API</p>
+                      <p className={cn(
+                        "font-semibold",
+                        evolutionResult?.flags?.configured ? "text-chart-2" : "text-muted-foreground"
+                      )}>
+                        {evolutionResult?.flags?.configured ? "Configurado" : "Verificar conexao"}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-lg bg-background/30 border border-border/20">
+                      <p className="text-xs text-muted-foreground/60 mb-1">Envio real</p>
+                      <p className={cn(
+                        "font-semibold",
+                        evolutionResult?.flags?.enabled && !evolutionResult?.flags?.dryRun ? "text-chart-2" : "text-chart-3"
+                      )}>
+                        {evolutionResult?.flags?.enabled && !evolutionResult?.flags?.dryRun ? "Liberado" : "Bloqueado"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Evolution API */}
+                <div className="rounded-xl bg-card/40 border border-border/20 p-6">
+                  <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-primary" />
+                    Evolution API
+                  </h3>
+                  <p className="text-sm text-muted-foreground/70 mb-4">
+                    Configurado via variaveis de ambiente. Nunca expor token no frontend.
+                  </p>
+                  <div className="grid gap-3 text-sm">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">EVOLUTION_API_URL</span>
+                      <span className="font-mono text-xs text-foreground/60">***configurado***</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">EVOLUTION_API_KEY</span>
+                      <span className="font-mono text-xs text-foreground/60">***mascarado***</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">EVOLUTION_INSTANCE</span>
+                      <span className="font-mono text-xs text-foreground/60">***configurado***</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">OPERATOR_WHATSAPP</span>
+                      <span className="font-mono text-xs text-foreground/60">***mascarado***</span>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestEvolution}
+                      disabled={evolutionLoading}
+                      className="h-9 gap-2"
+                    >
+                      <Settings className="h-3.5 w-3.5" />
+                      Testar conexao
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Midias */}
+                <div className="rounded-xl bg-card/40 border border-border/20 p-6">
+                  <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Tv className="w-4 h-4 text-primary" />
+                    Midias de Fluxo
+                  </h3>
+                  <p className="text-sm text-muted-foreground/70 mb-4">
+                    URLs de audios, imagens e figurinhas configuradas via ambiente.
+                  </p>
+                  <div className="grid gap-2 text-sm">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Audio boas-vindas</span>
+                      <span className="text-xs text-chart-2">Configurado</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Audio explicacao</span>
+                      <span className="text-xs text-chart-2">Configurado</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Imagem prova social</span>
+                      <span className="text-xs text-chart-2">Configurado</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Audio aparelho</span>
+                      <span className="text-xs text-chart-2">Configurado</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Codigos Downloader */}
+                <div className="rounded-xl bg-card/40 border border-border/20 p-6">
+                  <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-primary" />
+                    Codigos Downloader
+                  </h3>
+                  <div className="grid gap-2 text-sm sm:grid-cols-2">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">FunPlay</span>
+                      <span className="font-mono text-foreground">257286</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">PlaySim</span>
+                      <span className="font-mono text-foreground">7275096</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Blessed Player</span>
+                      <span className="font-mono text-foreground">6552503</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Padrao</span>
+                      <span className="font-mono text-foreground">4866905</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Links uteis */}
+                <div className="rounded-xl bg-card/40 border border-border/20 p-6">
+                  <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <User className="w-4 h-4 text-primary" />
+                    Links de Instalacao
+                  </h3>
+                  <div className="grid gap-2 text-sm">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">Video Downloader</span>
+                      <span className="font-mono text-xs text-primary/80 truncate max-w-[200px]">youtube.com/watch?v=ZCKnfzt1qaU</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">XCloud Android</span>
+                      <span className="font-mono text-xs text-primary/80 truncate max-w-[200px]">apk.centralplayplus.com.br</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">XCloud iPhone</span>
+                      <span className="font-mono text-xs text-primary/80 truncate max-w-[200px]">apps.apple.com</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-background/30 border border-border/20">
+                      <span className="text-muted-foreground">PC Web</span>
+                      <span className="font-mono text-xs text-primary/80">webx.daxy.top/login</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </main>
