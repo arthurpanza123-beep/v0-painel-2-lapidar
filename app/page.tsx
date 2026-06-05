@@ -38,7 +38,7 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   return (
     <button
       onClick={onRetry}
-      className="mt-1 w-full rounded-xl border border-destructive/40 bg-destructive/10 py-2.5 font-mono text-xs font-semibold uppercase tracking-widest text-destructive transition-all hover:bg-destructive/20 active:scale-[0.98]"
+      className="w-full rounded-xl border border-red-500/40 bg-red-500/10 py-3 font-mono text-xs font-bold uppercase tracking-[0.2em] text-red-400 shadow-[0_0_20px_rgb(239_68_68/0.1)] transition-all hover:bg-red-500/20 hover:shadow-[0_0_28px_rgb(239_68_68/0.2)] active:scale-[0.98]"
     >
       Retry
     </button>
@@ -121,16 +121,16 @@ function PainelContent() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-border px-5 py-3">
+      <header className="flex items-center justify-between border-b border-border bg-card/60 px-5 py-3 backdrop-blur-sm">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md border border-primary/30 bg-primary/10">
-            <span className="font-mono text-[11px] font-bold text-primary">J2</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/40 bg-blue-500/10 shadow-[0_0_12px_rgb(59_130_246/0.15)]">
+            <span className="font-mono text-[11px] font-bold text-blue-400">J2</span>
           </div>
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+            <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
               Central Play Plus
             </p>
-            <p className="text-xs font-semibold leading-none text-foreground">
+            <p className="text-xs font-semibold leading-tight text-foreground">
               Painel 2 · Operação em Tempo Real
             </p>
           </div>
@@ -138,15 +138,15 @@ function PainelContent() {
 
         <div className="flex items-center gap-3">
           {urlSource === 'painel1' && (
-            <span className="hidden rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-accent sm:inline-flex">
+            <span className="hidden rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-cyan-400 sm:inline-flex">
               Origem: Painel 1
             </span>
           )}
           <a
             href="https://painel.centralplayplus.com.br"
-            className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 font-mono text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            className="rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-xs text-muted-foreground transition-all hover:border-blue-500/40 hover:text-foreground"
           >
-            ← Gestão
+            &larr; Gestao
           </a>
         </div>
       </header>
@@ -177,8 +177,8 @@ function PainelContent() {
       </main>
 
       {/* Footer mínimo */}
-      <footer className="border-t border-border px-5 py-3 text-center font-mono text-[10px] uppercase tracking-widest text-muted-foreground/40">
-        Jarvis · Executor de Fluxos · v2
+      <footer className="border-t border-border bg-card/30 px-5 py-3 text-center font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground/30">
+        Jarvis &middot; Executor de Fluxos &middot; v2
       </footer>
     </div>
   )
