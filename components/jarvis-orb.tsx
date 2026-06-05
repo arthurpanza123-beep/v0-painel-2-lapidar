@@ -6,19 +6,11 @@ interface Props {
   ctx: JarvisCtx
 }
 
-type RingConfig = {
-  size: number
-  opacity: string
-  animation: string
-  border: string
-  glow?: string
-}
-
 const STATE_COLOR: Record<string, string> = {
   aguardando:    '#3b82f6',
   recebendo:     '#22d3ee',
   interpretando: '#a78bfa',
-  preparando:    '#3b82f6',
+  preparando:    '#60a5fa',
   executando:    '#22d3ee',
   falha:         '#ef4444',
   reenvio:       '#f59e0b',
@@ -36,117 +28,157 @@ const STATE_GLOW: Record<string, string> = {
   concluido:     'animate-jarvis-success',
 }
 
+type RingDef = {
+  size: number
+  opacity: number
+  animation: string
+  borderWidth: number
+  dashes?: string
+}
+
+const RINGS: RingDef[] = [
+  { size: 340, opacity: 0.04, animation: 'animate-ring-slow',     borderWidth: 1   },
+  { size: 300, opacity: 0.07, animation: 'animate-ring-rev-slow', borderWidth: 1   },
+  { size: 262, opacity: 0.11, animation: 'animate-ring-med',      borderWidth: 1.5 },
+  { size: 224, opacity: 0.18, animation: 'animate-ring-rev-med',  borderWidth: 1.5, dashes: '8 6' },
+  { size: 186, opacity: 0.28, animation: 'animate-ring-cw',       borderWidth: 2   },
+  { size: 152, opacity: 0.45, animation: 'animate-ring-ccw',      borderWidth: 2   },
+]
+
+interface OrbitalDot {
+  orbitRadius: number
+  size: number
+  color: string
+  duration: number
+  delay: number
+  ccw?: boolean
+}
+
+const ORBITAL_DOTS: OrbitalDot[] = [
+  { orbitRadius: 93,  size: 5,   color: '#ec4899', duration: 7,  delay: 0   },
+  { orbitRadius: 93,  size: 3.5, color: '#22d3ee', duration: 7,  delay: 3.5 },
+  { orbitRadius: 113, size: 4,   color: '#a78bfa', duration: 11, delay: 0,  ccw: true },
+  { orbitRadius: 131, size: 3,   color: '#f59e0b', duration: 15, delay: 5   },
+]
+
 export function JarvisOrb({ ctx }: Props) {
-  const color = STATE_COLOR[ctx.state] ?? '#3b82f6'
-  const glowClass = STATE_GLOW[ctx.state] ?? 'animate-jarvis-pulse'
-  const isAlert = ctx.state === 'falha'
+  const color     = STATE_COLOR[ctx.state] ?? '#3b82f6'
+  const glowClass = STATE_GLOW[ctx.state]  ?? 'animate-jarvis-pulse'
+  const isAlert   = ctx.state === 'falha'
   const isSuccess = ctx.state === 'concluido'
 
-  const rings: RingConfig[] = [
-    { size: 320, opacity: '0.08', animation: 'animate-ring-slow',     border: `1px solid ${color}` },
-    { size: 280, opacity: '0.12', animation: 'animate-ring-rev-slow', border: `1px solid ${color}` },
-    { size: 240, opacity: '0.18', animation: 'animate-ring-med',      border: `1.5px solid ${color}` },
-    { size: 200, opacity: '0.25', animation: 'animate-ring-rev-med',  border: `1.5px solid ${color}` },
-    { size: 162, opacity: '0.35', animation: 'animate-ring-cw',       border: `2px solid ${color}`, glow: `0 0 18px ${color}33` },
-  ]
-
-  // dots orbitais no anel exterior (decorativos)
-  const orbitalDots = [
-    { angle: 135, size: 4, color: '#ec4899' },
-    { angle: 20,  size: 3.5, color: '#22d3ee' },
-    { angle: 260, size: 4, color: '#ec4899' },
-  ]
+  const coreGradient = isAlert
+    ? 'radial-gradient(circle at 38% 32%, #2d0b0b 0%, #14060a 55%, #080c18 100%)'
+    : isSuccess
+    ? 'radial-gradient(circle at 38% 32%, #072d12 0%, #041509 55%, #080c18 100%)'
+    : 'radial-gradient(circle at 38% 32%, #0e2040 0%, #07142e 55%, #080c18 100%)'
 
   return (
-    <div className="relative flex items-center justify-center select-none">
-      {/* Rings */}
-      {rings.map((r, i) => (
+    <div className="relative flex items-center justify-center select-none" style={{ width: 360, height: 360 }}>
+
+      {/* Ambient glow behind everything */}
+      <div
+        className="pointer-events-none absolute rounded-full opacity-20 blur-3xl"
+        style={{
+          width: 280,
+          height: 280,
+          background: `radial-gradient(circle, ${color}55 0%, transparent 70%)`,
+        }}
+      />
+
+      {/* Orbital rings */}
+      {RINGS.map((r, i) => (
         <div
           key={i}
           className={`absolute rounded-full ${r.animation}`}
           style={{
-            width: r.size,
+            width:  r.size,
             height: r.size,
-            border: r.border,
-            opacity: Number(r.opacity),
-            boxShadow: r.glow,
+            border: `${r.borderWidth}px solid ${color}`,
+            opacity: r.opacity,
+            boxShadow: i >= 4 ? `0 0 ${12 + i * 4}px ${color}22` : undefined,
           }}
         />
       ))}
 
-      {/* Orbital dots no anel de 162px */}
-      {orbitalDots.map((d, i) => {
-        const rad = (d.angle * Math.PI) / 180
-        const r = 81
-        const x = Math.cos(rad) * r
-        const y = Math.sin(rad) * r
-        return (
+      {/* Orbital dots — animated around orb center */}
+      {ORBITAL_DOTS.map((d, i) => (
+        <div
+          key={i}
+          className="pointer-events-none absolute"
+          style={{
+            width: 0,
+            height: 0,
+            top: '50%',
+            left: '50%',
+            ['--orbit-r' as string]: `${d.orbitRadius}px`,
+            animation: `${d.ccw ? 'orbit-ccw' : 'orbit-cw'} ${d.duration}s ${d.delay}s linear infinite`,
+          }}
+        >
           <div
-            key={i}
-            className="absolute rounded-full"
             style={{
-              width: d.size,
+              width:  d.size,
               height: d.size,
+              borderRadius: '50%',
               background: d.color,
-              boxShadow: `0 0 6px ${d.color}`,
-              transform: `translate(${x}px, ${y}px)`,
+              boxShadow: `0 0 8px ${d.color}, 0 0 20px ${d.color}55`,
+              transform: `translate(-50%, -50%)`,
             }}
           />
-        )
-      })}
+        </div>
+      ))}
 
-      {/* Núcleo — glow + scan line */}
+      {/* Core nucleus */}
       <div
-        className={`relative flex h-36 w-36 items-center justify-center rounded-full ${glowClass}`}
+        className={`relative flex h-[140px] w-[140px] items-center justify-center rounded-full ${glowClass}`}
         style={{
-          background: isAlert
-            ? 'radial-gradient(circle at 40% 35%, #2a0a0a 0%, #120505 60%, #080c18 100%)'
-            : isSuccess
-              ? 'radial-gradient(circle at 40% 35%, #0a2a12 0%, #051205 60%, #080c18 100%)'
-              : 'radial-gradient(circle at 40% 35%, #0d1e3d 0%, #071228 60%, #080c18 100%)',
-          border: `1.5px solid ${color}50`,
+          background: coreGradient,
+          border:     `1.5px solid ${color}60`,
+          boxShadow: `inset 0 0 30px ${color}18, inset 0 1px 0 ${color}30`,
         }}
       >
-        {/* Reflexo interno */}
+        {/* Specular highlight */}
         <div
           className="pointer-events-none absolute inset-0 rounded-full"
-          style={{
-            background: `radial-gradient(circle at 30% 25%, ${color}22 0%, transparent 65%)`,
-          }}
+          style={{ background: `radial-gradient(ellipse at 35% 25%, ${color}28 0%, transparent 60%)` }}
+        />
+
+        {/* Inner glow ring */}
+        <div
+          className="pointer-events-none absolute inset-3 rounded-full opacity-20"
+          style={{ border: `1px solid ${color}`, filter: `blur(1px)` }}
         />
 
         {/* Scan line */}
         <div
-          className="animate-scan pointer-events-none absolute inset-x-3 h-px rounded-full"
-          style={{ background: `linear-gradient(to right, transparent, ${color}55, transparent)` }}
+          className="animate-scan pointer-events-none absolute inset-x-4 h-px rounded-full"
+          style={{ background: `linear-gradient(to right, transparent, ${color}70, transparent)` }}
         />
 
-        {/* Texto central */}
-        <div className="relative z-10 flex flex-col items-center gap-1.5 px-2 text-center">
+        {/* Text center */}
+        <div className="relative z-10 flex flex-col items-center gap-2 px-3 text-center">
           <p
-            key={ctx.label}
-            className="animate-fade-up font-mono text-xs font-bold uppercase tracking-[0.22em]"
-            style={{ color }}
+            key={ctx.state + '-label'}
+            className="animate-fade-up font-mono text-[11px] font-bold uppercase tracking-[0.28em]"
+            style={{ color, textShadow: `0 0 12px ${color}` }}
           >
             {ctx.label}
           </p>
           <p
-            key={ctx.sub}
-            className="animate-fade-up font-sans text-[10px] leading-tight text-foreground/60"
+            key={ctx.state + '-sub'}
+            className="animate-fade-up font-sans text-[10px] leading-tight text-foreground/55"
           >
             {ctx.sub}
           </p>
-
-          {/* Dots de atividade */}
-          <div className="mt-1 flex gap-1.5">
+          <div className="mt-0.5 flex gap-1.5">
             {[0, 1, 2].map(i => (
               <span
                 key={i}
                 className="h-1.5 w-1.5 rounded-full"
                 style={{
                   background: color,
-                  boxShadow: `0 0 4px ${color}`,
-                  animation: `dot-bounce 1.4s ${i * 0.18}s ease-in-out infinite`,
+                  boxShadow: `0 0 5px ${color}`,
+                  animation: `dot-bounce 1.4s ${i * 0.2}s ease-in-out infinite`,
                 }}
               />
             ))}
@@ -154,15 +186,18 @@ export function JarvisOrb({ ctx }: Props) {
         </div>
       </div>
 
-      {/* Título abaixo do orb */}
+      {/* Label below orb */}
       <div
-        className="absolute flex flex-col items-center gap-1 whitespace-nowrap"
-        style={{ top: '50%', transform: 'translateY(108px)' }}
+        className="pointer-events-none absolute flex flex-col items-center gap-1.5 whitespace-nowrap"
+        style={{ top: '50%', transform: 'translateY(82px)' }}
       >
-        <p className="font-mono text-[18px] font-bold tracking-[0.35em] text-foreground/90">
+        <p
+          className="font-mono text-[17px] font-bold tracking-[0.4em] text-foreground/85"
+          style={{ textShadow: '0 0 30px rgba(59,130,246,0.3)' }}
+        >
           J A R V I S
         </p>
-        <p className="font-mono text-[9px] uppercase tracking-[0.4em] text-muted-foreground/50">
+        <p className="font-mono text-[8px] uppercase tracking-[0.5em] text-muted-foreground/40">
           Central Play
         </p>
       </div>

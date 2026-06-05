@@ -165,23 +165,53 @@ function PainelInner() {
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b border-border/40 bg-background/80 px-5 backdrop-blur-sm">
+        <header
+          className="relative z-10 flex h-11 shrink-0 items-center justify-between px-5"
+          style={{
+            background: 'linear-gradient(180deg, rgba(13,18,32,0.98) 0%, rgba(9,14,28,0.95) 100%)',
+            borderBottom: '1px solid rgba(30,45,71,0.7)',
+            boxShadow: '0 1px 0 rgba(59,130,246,0.06)',
+          }}
+        >
           <div className="flex items-center gap-2.5">
-            <span className="flex items-center gap-1.5 rounded-full border border-[#22c55e]/40 bg-[#22c55e]/10 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[#22c55e]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e] shadow-[0_0_6px_#22c55e]" />
+            <span
+              className="flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-mono text-[10px] uppercase tracking-widest"
+              style={{
+                background: 'rgba(34,197,94,0.08)',
+                border: '1px solid rgba(34,197,94,0.3)',
+                color: '#22c55e',
+                boxShadow: '0 0 12px rgba(34,197,94,0.12)',
+              }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
               ATIVO
             </span>
-            <span className="font-mono text-[13px] font-semibold text-foreground">Central Play</span>
-            <span className="rounded-md bg-[#3b82f6]/20 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-[#3b82f6]">Plus</span>
+            <span className="font-mono text-[13px] font-semibold text-foreground/90">Central Play</span>
+            <span
+              className="rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide"
+              style={{
+                background: 'linear-gradient(90deg, rgba(59,130,246,0.2) 0%, rgba(34,211,238,0.15) 100%)',
+                border: '1px solid rgba(59,130,246,0.3)',
+                color: '#60a5fa',
+              }}
+            >
+              Plus
+            </span>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground sm:inline">
+          <div className="flex items-center gap-4">
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
               Tempo real
             </span>
             <a
               href="https://painel.centralplayplus.com.br"
               title="Voltar para Gestao"
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-[#3b82f6]/20 font-mono text-[10px] font-bold text-[#3b82f6] ring-1 ring-[#3b82f6]/30 transition-all hover:bg-[#3b82f6]/30"
+              className="flex h-7 w-7 items-center justify-center rounded-full font-mono text-[10px] font-bold transition-all"
+              style={{
+                background: 'linear-gradient(135deg, rgba(59,130,246,0.25) 0%, rgba(34,211,238,0.15) 100%)',
+                border: '1px solid rgba(59,130,246,0.35)',
+                color: '#60a5fa',
+                boxShadow: '0 0 12px rgba(59,130,246,0.2)',
+              }}
             >
               JS
             </a>
@@ -190,30 +220,60 @@ function PainelInner() {
 
         {/* Canvas central */}
         <main className="relative flex flex-1 items-center justify-center overflow-hidden">
-          {/* Partículas */}
+          {/* Radial ambient glow de fundo */}
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background: 'radial-gradient(ellipse 55% 55% at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 70%)',
+            }}
+          />
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background: 'radial-gradient(ellipse 30% 30% at 50% 50%, rgba(34,211,238,0.04) 0%, transparent 60%)',
+            }}
+          />
+
+          {/* Partículas com twinkle */}
           <Particles />
 
           {/* Painel flutuante esquerdo */}
-          <div className="absolute left-5 top-1/2 z-10 w-44 -translate-y-1/2">
-            <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+          <div className="animate-float absolute left-5 top-1/2 z-10 w-44">
+            <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
               <IconBolt />
               Ultimo Evento
             </p>
-            <div className="rounded-xl border border-border/50 bg-card/70 px-3 py-2.5 shadow-[0_4px_24px_rgb(0_0_0/0.3)] backdrop-blur-sm">
-              <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed text-foreground/80">
+            <div
+              className="rounded-xl px-3.5 py-3"
+              style={{
+                background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
+                border: '1px solid rgba(30,45,71,0.8)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
+                backdropFilter: 'blur(12px)',
+              }}
+            >
+              <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
                 {ctx.ultimoEvento}
               </p>
             </div>
           </div>
 
           {/* Painel flutuante direito */}
-          <div className="absolute right-5 top-1/2 z-10 w-44 -translate-y-1/2 text-right">
-            <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+          <div className="animate-float absolute right-5 top-1/2 z-10 w-44 text-right" style={{ animationDelay: '1s' }}>
+            <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
               Acao Atual
               <IconPlay />
             </p>
-            <div className="rounded-xl border border-border/50 bg-card/70 px-3 py-2.5 shadow-[0_4px_24px_rgb(0_0_0/0.3)] backdrop-blur-sm">
-              <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed text-foreground/80">
+            <div
+              className="rounded-xl px-3.5 py-3"
+              style={{
+                background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
+                border: '1px solid rgba(30,45,71,0.8)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
+                backdropFilter: 'blur(12px)',
+              }}
+            >
+              <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
                 {ctx.acao}
               </p>
             </div>
@@ -235,19 +295,30 @@ function PainelInner() {
 
 function Particles() {
   const dots = [
-    { x: 12, y: 18, s: 2 }, { x: 80, y: 10, s: 1.5 }, { x: 47, y: 6, s: 2.5 },
-    { x: 91, y: 33, s: 1 }, { x: 6, y: 58, s: 1.5 }, { x: 77, y: 72, s: 1 },
-    { x: 33, y: 87, s: 2 }, { x: 60, y: 48, s: 1 }, { x: 88, y: 82, s: 1.5 },
-    { x: 20, y: 43, s: 1 }, { x: 52, y: 93, s: 1 }, { x: 68, y: 23, s: 1.5 },
-    { x: 40, y: 30, s: 1 }, { x: 25, y: 70, s: 1.5 },
+    { x: 8,  y: 15, s: 2,   d: 3.1 }, { x: 82, y: 9,  s: 1.5, d: 4.7 },
+    { x: 45, y: 5,  s: 2.5, d: 2.8 }, { x: 93, y: 31, s: 1,   d: 6.2 },
+    { x: 5,  y: 60, s: 1.5, d: 3.9 }, { x: 78, y: 74, s: 1,   d: 5.4 },
+    { x: 31, y: 88, s: 2,   d: 4.1 }, { x: 62, y: 46, s: 1,   d: 2.5 },
+    { x: 89, y: 84, s: 1.5, d: 6.8 }, { x: 18, y: 42, s: 1,   d: 3.3 },
+    { x: 54, y: 94, s: 1,   d: 5.1 }, { x: 70, y: 21, s: 1.5, d: 4.4 },
+    { x: 38, y: 28, s: 1,   d: 3.7 }, { x: 24, y: 68, s: 1.5, d: 6.0 },
+    { x: 67, y: 12, s: 1,   d: 2.9 }, { x: 14, y: 82, s: 2,   d: 5.6 },
   ]
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       {dots.map((d, i) => (
         <span
           key={i}
-          className="absolute rounded-full bg-[#3b82f6]/25"
-          style={{ left: `${d.x}%`, top: `${d.y}%`, width: d.s, height: d.s }}
+          className="absolute rounded-full animate-twinkle"
+          style={{
+            left: `${d.x}%`,
+            top:  `${d.y}%`,
+            width:  d.s,
+            height: d.s,
+            background: i % 3 === 0 ? '#22d3ee' : '#3b82f6',
+            animationDuration: `${d.d}s`,
+            animationDelay: `${(i * 0.37) % d.d}s`,
+          }}
         />
       ))}
     </div>

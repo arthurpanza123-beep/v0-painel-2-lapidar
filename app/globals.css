@@ -172,3 +172,29 @@
   50%       { transform: scaleY(1); }
 }
 .animate-bar { animation: bar-grow 1.4s ease-in-out infinite; }
+
+/* particle twinkle */
+@keyframes twinkle {
+  0%, 100% { opacity: 0.08; transform: scale(1); }
+  50%       { opacity: 0.55; transform: scale(1.6); }
+}
+.animate-twinkle { animation: twinkle ease-in-out infinite; }
+
+/* orbital dot rotate around orb */
+@keyframes orbit-cw {
+  from { transform: rotate(0deg)   translateX(var(--orbit-r)) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(var(--orbit-r)) rotate(-360deg); }
+}
+@keyframes orbit-ccw {
+  from { transform: rotate(0deg)    translateX(var(--orbit-r)) rotate(0deg); }
+  to   { transform: rotate(-360deg) translateX(var(--orbit-r)) rotate(360deg); }
+}
+.animate-orbit-cw  { animation: orbit-cw  linear infinite; }
+.animate-orbit-ccw { animation: orbit-ccw linear infinite; }
+
+/* float subtle for floating panels */
+@keyframes float {
+  0%, 100% { transform: translateY(-50%) translateY(0px); }
+  50%       { transform: translateY(-50%) translateY(-5px); }
+}
+.animate-float { animation: float 6s ease-in-out infinite; }
