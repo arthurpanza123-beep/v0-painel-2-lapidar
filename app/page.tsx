@@ -6,21 +6,44 @@ import { JarvisOrb } from '@/components/jarvis-orb'
 import { Sidebar } from '@/components/sidebar'
 import { BottomBar } from '@/components/bottom-bar'
 import { StatusBar } from '@/components/status-bar'
+import { FlowPanel } from '@/components/flow-panel'
+import { ConfigPanel } from '@/components/config-panel'
 
 export type JarvisState =
   | 'aguardando'
   | 'recebendo'
   | 'interpretando'
   | 'preparando'
+  | 'confirmando'
   | 'executando'
+  | 'simulando'
+  | 'concluido'
   | 'falha'
   | 'reenvio'
-  | 'concluido'
+
+export type FlowKey =
+  | null
+  | 'test_created'
+  | 'test_expired'
+  | 'renewal_created'
+  | 'app_swap'
+  | 'second_screen'
+  | 'installation'
+  | 'boas_vindas'
+  | 'xcloud_remove_device'
+  | 'xcloud_recreate_device'
+  | 'problem_created'
+  | 'charge_customer'
 
 export interface LogEntry {
   id: number
   text: string
   type: 'info' | 'warn' | 'error' | 'success'
+}
+
+export interface ActionItem {
+  label: string
+  variant: 'primary' | 'warn' | 'danger' | 'muted'
 }
 
 export interface JarvisCtx {
@@ -34,6 +57,14 @@ export interface JarvisCtx {
   steps: string[] | null
   processados: number
   fila: number
+  flow: FlowKey
+  // contexto do cliente/flow
+  clienteNome: string | null
+  appAtual: string | null
+  appNovo: string | null
+  painel: string | null
+  dispositivo: string | null
+  acoes: ActionItem[]
 }
 
 const INITIAL: JarvisCtx = {
@@ -47,6 +78,13 @@ const INITIAL: JarvisCtx = {
   steps: null,
   processados: 0,
   fila: 0,
+  flow: null,
+  clienteNome: null,
+  appAtual: null,
+  appNovo: null,
+  painel: null,
+  dispositivo: null,
+  acoes: [],
 }
 
 let _lid = 1
@@ -58,20 +96,50 @@ function pushLogs(prev: JarvisCtx, ...entries: LogEntry[]): JarvisCtx {
   return { ...prev, logs: [...prev.logs, ...entries].slice(-5) }
 }
 
+export type NavTab = 'central' | 'falhas' | 'console' | 'historico' | 'configuracoes'
+
 function PainelInner() {
   const params = useSearchParams()
   const clientId = params.get('client_id')
-  const testId = params.get('test_id')
-  const source = params.get('source')
+  const testId   = params.get('test_id')
+  const source   = params.get('source')
+  const flowParam = params.get('flow') as FlowKey | null
 
   const [ctx, setCtx] = useState<JarvisCtx>(() => {
+    if (source === 'painel1' && flowParam) {
+      const flowLabels: Record<string, string> = {
+        test_created:          'TEST_CREATED',
+        test_expired:          'TEST_EXPIRED',
+        renewal_created:       'RENEWAL_CREATED',
+        app_swap:              'APP_SWAP',
+        second_screen:         'SECOND_SCREEN',
+        problem_created:       'PROBLEM_CREATED',
+        xcloud_remove_device:  'XCLOUD_REMOVE',
+        xcloud_recreate_device:'XCLOUD_RECREATE',
+        charge_customer:       'CHARGE_CUSTOMER',
+      }
+      return {
+        ...INITIAL,
+        state: 'recebendo',
+        label: 'RECEBENDO',
+        sub: 'Contexto recebido do Painel 1',
+        acao: `Aguardando execucao: ${flowParam}`,
+        ultimoEvento: `Flow: ${flowParam}`,
+        flow: flowParam,
+        logs: [
+          mkLog('CONTEXT_RECEIVED', 'success'),
+          mkLog(`SOURCE=painel1  FLOW=${flowParam}`, 'info'),
+          testId ? mkLog(`TEST_ID=${testId}`, 'info') : mkLog('AWAITING_FLOW_SELECTION', 'info'),
+        ],
+      }
+    }
     if (source === 'painel1') {
       return {
         ...INITIAL,
         state: 'recebendo',
         label: 'RECEBENDO',
         sub: 'Recebendo contexto do Painel 1',
-        acao: 'Aguardando missao do Painel 1',
+        acao: 'Aguardando selecao de flow',
         ultimoEvento: `Contexto recebido${testId ? ` · Teste #${testId}` : ''}`,
         logs: [
           mkLog('CONTEXT_RECEIVED', 'success'),
@@ -83,7 +151,7 @@ function PainelInner() {
     return INITIAL
   })
 
-  const [activeTab, setActiveTab] = useState<'central' | 'falhas' | 'console' | 'historico'>('central')
+  const [activeTab, setActiveTab] = useState<NavTab>('central')
 
   const dispatch = useCallback((next: Partial<JarvisCtx> & { newLogs?: LogEntry[] }) => {
     setCtx(prev => {
@@ -95,58 +163,296 @@ function PainelInner() {
 
   const handleEvent = useCallback((eventKey: string) => {
     switch (eventKey) {
+
+      /* ── INSTALAÇÃO ─────────────────────────────── */
       case 'tvlg':
         dispatch({
-          state: 'executando', label: 'EXECUTANDO', sub: 'Preparando instalacao LG',
-          acao: 'Preparando instalacao LG', ultimoEvento: 'Cliente respondeu: TV LG',
+          state: 'preparando', label: 'PREPARANDO', sub: 'Guia de instalacao LG pronto',
+          acao: 'Preparar mensagem de instalacao LG',
+          ultimoEvento: 'Cliente respondeu: TV LG',
+          flow: 'installation', dispositivo: 'TV LG',
           retryVisible: false, steps: null, processados: ctx.processados + 1,
-          newLogs: [mkLog('DEVICE_DETECTED_LG', 'success'), mkLog('INSTALLATION_FLOW_SELECTED', 'info'), mkLog('INSTALLATION_READY', 'info')],
-        }); break
+          acoes: [
+            { label: 'Preparar mensagem', variant: 'primary' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+            { label: 'Enviar simulado', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('DEVICE_DETECTED=TV_LG', 'success'),
+            mkLog('INSTALLATION_FLOW_SELECTED', 'info'),
+            mkLog('MESSAGE_READY', 'info'),
+          ],
+        })
+        break
+
+      /* ── ÁUDIO FALHOU ────────────────────────────── */
       case 'audio':
         dispatch({
           state: 'falha', label: 'FALHA', sub: 'Audio 4 falhou',
-          acao: 'Reenviar audio 4', ultimoEvento: 'Audio falhou',
+          acao: 'Reenviar audio 4',
+          ultimoEvento: 'Audio falhou',
+          flow: 'boas_vindas',
           retryVisible: true, steps: null, fila: ctx.fila + 1,
-          newLogs: [mkLog('WELCOME_AUDIO_4_FAILED', 'error'), mkLog('RETRY_READY', 'warn')],
-        }); break
+          acoes: [
+            { label: 'Retry audio 4', variant: 'danger' },
+            { label: 'Pular etapa', variant: 'warn' },
+          ],
+          newLogs: [
+            mkLog('WELCOME_AUDIO_4_FAILED', 'error'),
+            mkLog('RETRY_READY', 'warn'),
+          ],
+        })
+        break
+
+      /* ── JA PAGUEI ───────────────────────────────── */
       case 'paguei':
         dispatch({
           state: 'interpretando', label: 'INTERPRETANDO', sub: 'Confirmando pagamento',
-          acao: 'Verificando confirmacao', ultimoEvento: 'Ja paguei',
+          acao: 'Verificar confirmacao de pagamento',
+          ultimoEvento: 'Ja paguei',
+          flow: 'charge_customer',
           retryVisible: false, steps: null,
-          newLogs: [mkLog('PAYMENT_CLAIM_RECEIVED', 'info'), mkLog('AWAITING_CONFIRMATION', 'warn')],
-        }); break
+          acoes: [
+            { label: 'Verificar no sistema', variant: 'primary' },
+            { label: 'Solicitar comprovante', variant: 'warn' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('PAYMENT_CLAIM_RECEIVED', 'info'),
+            mkLog('AWAITING_CONFIRMATION', 'warn'),
+          ],
+        })
+        break
+
+      /* ── ATIVAR ──────────────────────────────────── */
       case 'ativar':
         dispatch({
           state: 'preparando', label: 'PREPARANDO', sub: 'Preparando ativacao',
-          acao: 'Verificando elegibilidade', ultimoEvento: 'Ativar',
+          acao: 'Verificar elegibilidade para ativacao',
+          ultimoEvento: 'Quero ativar',
+          flow: 'renewal_created',
           retryVisible: false, steps: null,
-          newLogs: [mkLog('INTENT_DETECTED=ATIVAR', 'info'), mkLog('ELIGIBILITY_CHECK', 'warn')],
-        }); break
+          acoes: [
+            { label: 'Preparar mensagem', variant: 'primary' },
+            { label: 'Escolher template', variant: 'muted' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('INTENT_DETECTED=ATIVAR', 'info'),
+            mkLog('ELIGIBILITY_CHECK', 'warn'),
+          ],
+        })
+        break
+
+      /* ── RECRIAR XCLOUD ──────────────────────────── */
       case 'xcloud':
         dispatch({
-          state: 'executando', label: 'EXECUTANDO', sub: 'Orquestrando recriacao',
-          acao: 'Recriar device XCloud', ultimoEvento: 'Recriar XCloud',
-          retryVisible: false, fila: ctx.fila + 1,
-          steps: ['Localizar', 'Desativar', 'Excluir', 'Recriar', 'Vincular Xtream', 'Confirmar RELOAD'],
-          newLogs: [mkLog('XCLOUD_RECREATE_INIT', 'warn'), mkLog('DEVICE_LOCATE_START', 'info')],
-        }); break
+          state: 'executando', label: 'EXECUTANDO', sub: 'Orquestrando recriacao XCloud',
+          acao: 'Recriar device XCloud',
+          ultimoEvento: 'Recriar XCloud',
+          flow: 'xcloud_recreate_device',
+          retryVisible: false,
+          fila: ctx.fila + 1,
+          steps: ['Localizar device', 'Desativar', 'Excluir', 'Recriar', 'Vincular Xtream', 'Confirmar RELOAD'],
+          acoes: [
+            { label: 'Confirmar recriacao', variant: 'primary' },
+            { label: 'Aguardar RELOAD', variant: 'warn' },
+          ],
+          newLogs: [
+            mkLog('XCLOUD_RECREATE_INIT', 'warn'),
+            mkLog('DEVICE_LOCATE_START', 'info'),
+          ],
+        })
+        break
+
+      /* ── REMOVER XCLOUD ──────────────────────────── */
+      case 'xcloud_remove':
+        dispatch({
+          state: 'executando', label: 'EXECUTANDO', sub: 'Removendo device XCloud',
+          acao: 'Remover device XCloud',
+          ultimoEvento: 'Remover XCloud',
+          flow: 'xcloud_remove_device',
+          retryVisible: false,
+          fila: ctx.fila + 1,
+          steps: ['Localizar device', 'Desativar', 'Excluir device'],
+          acoes: [
+            { label: 'Confirmar remocao', variant: 'danger' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('XCLOUD_REMOVE_INIT', 'warn'),
+            mkLog('DEVICE_LOCATE_START', 'info'),
+          ],
+        })
+        break
+
+      /* ── FALHA XCLOUD ────────────────────────────── */
       case 'falha_xcloud':
         dispatch({
-          state: 'falha', label: 'FALHA', sub: 'Falha no XCloud',
-          acao: 'Verificar logs XCloud', ultimoEvento: 'Falha XCloud',
+          state: 'falha', label: 'FALHA', sub: 'Falha detectada no XCloud',
+          acao: 'Verificar logs XCloud',
+          ultimoEvento: 'Falha XCloud',
+          flow: 'problem_created',
           retryVisible: true, steps: null, fila: ctx.fila + 1,
-          newLogs: [mkLog('XCLOUD_ERROR_DETECTED', 'error'), mkLog('RETRY_AVAILABLE', 'warn')],
-        }); break
+          acoes: [
+            { label: 'Retry operacao', variant: 'danger' },
+            { label: 'Preparar prompt Codex', variant: 'warn' },
+          ],
+          newLogs: [
+            mkLog('XCLOUD_ERROR_DETECTED', 'error'),
+            mkLog('RETRY_AVAILABLE', 'warn'),
+          ],
+        })
+        break
+
+      /* ── TESTE CRIADO ────────────────────────────── */
+      case 'test_created':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Teste pronto para envio',
+          acao: 'Preparar mensagem do teste',
+          ultimoEvento: 'Teste criado',
+          flow: 'test_created',
+          retryVisible: false, steps: null, processados: ctx.processados + 1,
+          acoes: [
+            { label: 'Preparar mensagem', variant: 'primary' },
+            { label: 'Preparar arte do teste', variant: 'muted' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('TEST_CREATED_RECEIVED', 'success'),
+            mkLog('CLIENT_CONTEXT_LOADED', 'info'),
+            mkLog('TEST_MESSAGE_READY', 'info'),
+            mkLog('WAITING_OPERATOR', 'warn'),
+          ],
+        })
+        break
+
+      /* ── TESTE EXPIRADO ──────────────────────────── */
+      case 'test_expired':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Teste encerrado — preparando acoes',
+          acao: 'Preparar figurinha de teste expirado',
+          ultimoEvento: 'Teste expirado',
+          flow: 'test_expired',
+          retryVisible: false, steps: null,
+          acoes: [
+            { label: 'Enviar figurinha', variant: 'primary' },
+            { label: 'Abrir painel provedor', variant: 'muted' },
+            { label: 'Copiar usuario cliente', variant: 'muted' },
+            { label: 'Remover device XCloud', variant: 'warn' },
+          ],
+          newLogs: [
+            mkLog('TEST_EXPIRED_RECEIVED', 'warn'),
+            mkLog('STICKER_FLOW_READY', 'info'),
+            mkLog('AWAITING_OPERATOR', 'warn'),
+          ],
+        })
+        break
+
+      /* ── RENOVAÇÃO ───────────────────────────────── */
+      case 'renewal':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Mensagem de renovacao pronta',
+          acao: 'Preparar template de renovacao',
+          ultimoEvento: 'Renovacao criada',
+          flow: 'renewal_created',
+          retryVisible: false, steps: null, processados: ctx.processados + 1,
+          acoes: [
+            { label: 'Preparar mensagem', variant: 'primary' },
+            { label: 'Escolher template', variant: 'muted' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+            { label: 'Enviar simulado', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('RENEWAL_CREATED_RECEIVED', 'success'),
+            mkLog('TEMPLATE_SELECTED', 'info'),
+            mkLog('MESSAGE_READY', 'info'),
+          ],
+        })
+        break
+
+      /* ── TROCA DE APP ────────────────────────────── */
+      case 'app_swap':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando troca de aplicativo',
+          acao: 'Preparar instrucoes de migracao',
+          ultimoEvento: 'Troca de app',
+          flow: 'app_swap',
+          appAtual: 'App Atual', appNovo: 'App Novo', painel: 'Painel Demo',
+          retryVisible: false, steps: null,
+          acoes: [
+            { label: 'Preparar mensagem', variant: 'primary' },
+            { label: 'Preparar instalacao', variant: 'muted' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('APP_SWAP_RECEIVED', 'info'),
+            mkLog('MIGRATION_FLOW_READY', 'info'),
+            mkLog('AWAITING_OPERATOR', 'warn'),
+          ],
+        })
+        break
+
+      /* ── SEGUNDA TELA ────────────────────────────── */
+      case 'second_screen':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando segunda tela',
+          acao: 'Preparar instrucao de segunda tela',
+          ultimoEvento: 'Segunda tela',
+          flow: 'second_screen',
+          retryVisible: false, steps: null,
+          acoes: [
+            { label: 'Preparar instrucao', variant: 'primary' },
+            { label: 'Verificar tela disponivel', variant: 'muted' },
+            { label: 'Aguardar confirmacao', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('SECOND_SCREEN_RECEIVED', 'info'),
+            mkLog('SCREEN_SLOT_CHECK', 'warn'),
+            mkLog('AWAITING_OPERATOR', 'warn'),
+          ],
+        })
+        break
+
+      /* ── PROBLEMA ────────────────────────────────── */
+      case 'problem':
+        dispatch({
+          state: 'interpretando', label: 'INTERPRETANDO', sub: 'Problema identificado',
+          acao: 'Preparar resposta ao problema',
+          ultimoEvento: 'Problema reportado',
+          flow: 'problem_created',
+          retryVisible: false, steps: null,
+          acoes: [
+            { label: 'Preparar resposta', variant: 'primary' },
+            { label: 'Preparar troca de app', variant: 'warn' },
+            { label: 'Preparar prompt Codex', variant: 'muted' },
+            { label: 'Salvar conhecimento', variant: 'muted' },
+          ],
+          newLogs: [
+            mkLog('PROBLEM_CREATED_RECEIVED', 'warn'),
+            mkLog('FLOW_ANALYSIS_START', 'info'),
+            mkLog('AWAITING_OPERATOR', 'warn'),
+          ],
+        })
+        break
+
+      /* ── RETRY ───────────────────────────────────── */
       case 'retry':
         dispatch({
-          state: 'reenvio', label: 'REENVIO', sub: 'Reenvio preparado',
-          acao: 'Executando retry...', ultimoEvento: 'Retry acionado',
-          retryVisible: false, processados: ctx.processados + 1, fila: Math.max(0, ctx.fila - 1),
-          newLogs: [mkLog('RETRY_TRIGGERED', 'warn'), mkLog('FLOW_RESTARTED', 'info')],
+          state: 'reenvio', label: 'REENVIO', sub: 'Reenvio em andamento...',
+          acao: 'Executando retry...',
+          ultimoEvento: 'Retry acionado',
+          retryVisible: false,
+          processados: ctx.processados + 1,
+          fila: Math.max(0, ctx.fila - 1),
+          newLogs: [
+            mkLog('RETRY_TRIGGERED', 'warn'),
+            mkLog('FLOW_RESTARTED', 'info'),
+          ],
         })
         setTimeout(() => setCtx(prev => ({
-          ...prev, state: 'concluido', label: 'CONCLUIDO', sub: 'Fluxo concluido',
+          ...prev,
+          state: 'concluido', label: 'CONCLUIDO', sub: 'Fluxo concluido',
           acao: 'Aguardando proximo evento',
           logs: [...prev.logs, mkLog('FLOW_COMPLETED', 'success')].slice(-5),
         })), 2200)
@@ -161,7 +467,7 @@ function PainelInner() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      <Sidebar active={activeTab} onNav={setActiveTab} source={source} clientId={clientId} testId={testId} />
+      <Sidebar active={activeTab} onNav={setActiveTab} source={source} clientId={clientId} testId={testId} flow={flowParam} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
@@ -199,7 +505,7 @@ function PainelInner() {
             </span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] sm:inline" style={{ color: 'rgba(107,127,168,0.6)' }}>
               Tempo real
             </span>
             <a
@@ -218,75 +524,81 @@ function PainelInner() {
           </div>
         </header>
 
-        {/* Canvas central */}
-        <main className="relative flex flex-1 items-center justify-center overflow-hidden">
-          {/* Radial ambient glow de fundo */}
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background: 'radial-gradient(ellipse 55% 55% at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 70%)',
-            }}
-          />
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background: 'radial-gradient(ellipse 30% 30% at 50% 50%, rgba(34,211,238,0.04) 0%, transparent 60%)',
-            }}
-          />
-
-          {/* Partículas com twinkle */}
-          <Particles />
-
-          {/* Painel flutuante esquerdo */}
-          <div className="animate-float absolute left-5 top-1/2 z-10 w-44">
-            <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
-              <IconBolt />
-              Ultimo Evento
-            </p>
-            <div
-              className="rounded-xl px-3.5 py-3"
-              style={{
-                background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
-                border: '1px solid rgba(30,45,71,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
-                backdropFilter: 'blur(12px)',
-              }}
-            >
-              <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
-                {ctx.ultimoEvento}
-              </p>
-            </div>
+        {/* Conteudo principal */}
+        {activeTab === 'configuracoes' ? (
+          <div className="flex-1 overflow-y-auto">
+            <ConfigPanel />
           </div>
-
-          {/* Painel flutuante direito */}
-          <div className="animate-float absolute right-5 top-1/2 z-10 w-44 text-right" style={{ animationDelay: '1s' }}>
-            <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
-              Acao Atual
-              <IconPlay />
-            </p>
+        ) : (
+          <main className="relative flex flex-1 items-center justify-center overflow-hidden">
+            {/* Radial ambient glow */}
             <div
-              className="rounded-xl px-3.5 py-3"
-              style={{
-                background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
-                border: '1px solid rgba(30,45,71,0.8)',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
-                backdropFilter: 'blur(12px)',
-              }}
-            >
-              <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
-                {ctx.acao}
-              </p>
-            </div>
-          </div>
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(ellipse 55% 55% at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 70%)' }}
+            />
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(ellipse 30% 30% at 50% 50%, rgba(34,211,238,0.04) 0%, transparent 60%)' }}
+            />
 
-          {/* Orb */}
-          <JarvisOrb ctx={ctx} />
-        </main>
+            <Particles />
+
+            {/* Painel flutuante esquerdo — Ultimo Evento */}
+            <div className="animate-float absolute left-5 top-1/2 z-10 w-44">
+              <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
+                <IconBolt />
+                Ultimo Evento
+              </p>
+              <div
+                className="rounded-xl px-3.5 py-3"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
+                  border: '1px solid rgba(30,45,71,0.8)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
+                  {ctx.ultimoEvento}
+                </p>
+              </div>
+            </div>
+
+            {/* Painel flutuante direito — Acao Atual */}
+            <div className="animate-float absolute right-5 top-1/2 z-10 w-44 text-right" style={{ animationDelay: '1s' }}>
+              <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
+                Acao Atual
+                <IconPlay />
+              </p>
+              <div
+                className="rounded-xl px-3.5 py-3"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
+                  border: '1px solid rgba(30,45,71,0.8)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
+                  {ctx.acao}
+                </p>
+              </div>
+            </div>
+
+            {/* Orb */}
+            <JarvisOrb ctx={ctx} />
+
+            {/* Flow Panel — aparece quando ha flow ativo */}
+            {ctx.flow && activeTab === 'central' && (
+              <FlowPanel ctx={ctx} />
+            )}
+          </main>
+        )}
 
         {/* Barra inferior */}
         <BottomBar ctx={ctx} onEvent={handleEvent} />
 
-        {/* Barra de status */}
+        {/* Status Bar */}
         <StatusBar ctx={ctx} onReset={handleReset} />
       </div>
     </div>
