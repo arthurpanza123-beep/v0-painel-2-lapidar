@@ -1,203 +1,286 @@
 'use client'
 
+import { Suspense, useCallback, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useCallback, useEffect, useState } from 'react'
-import { JarvisCore, type JarvisState } from '@/components/jarvis-core'
-import { ContextCard, type ContextData } from '@/components/context-card'
-import { EventButtons, type EventPayload, EVENTS } from '@/components/event-buttons'
-import { ConsoleLog } from '@/components/console-log'
-import { cn } from '@/lib/utils'
+import { JarvisOrb } from '@/components/jarvis-orb'
+import { Sidebar } from '@/components/sidebar'
+import { BottomBar } from '@/components/bottom-bar'
+import { StatusBar } from '@/components/status-bar'
 
-// ─── Steps overlay para XCloud / Boas-vindas ───────────────────────────────
+export type JarvisState =
+  | 'aguardando'
+  | 'recebendo'
+  | 'interpretando'
+  | 'preparando'
+  | 'executando'
+  | 'falha'
+  | 'reenvio'
+  | 'concluido'
 
-function StepsOverlay({ steps, active }: { steps: string[]; active: boolean }) {
-  if (!active || steps.length === 0) return null
-  return (
-    <div className="animate-fade-up w-full rounded-xl border border-border bg-card px-4 py-3">
-      <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-        Etapas
-      </p>
-      <ol className="flex flex-wrap gap-x-3 gap-y-1.5">
-        {steps.map((step, i) => (
-          <li key={step} className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] text-muted-foreground/50">{i + 1}.</span>
-            <span className="text-xs text-foreground/70">{step}</span>
-            {i < steps.length - 1 && (
-              <span className="text-muted-foreground/30">›</span>
-            )}
-          </li>
-        ))}
-      </ol>
-    </div>
-  )
+export interface LogEntry {
+  id: number
+  text: string
+  type: 'info' | 'warn' | 'error' | 'success'
 }
 
-// ─── Retry button ──────────────────────────────────────────────────────────
-
-function RetryButton({ onRetry }: { onRetry: () => void }) {
-  return (
-    <button
-      onClick={onRetry}
-      className="w-full rounded-xl border border-red-500/40 bg-red-500/10 py-3 font-mono text-xs font-bold uppercase tracking-[0.2em] text-red-400 shadow-[0_0_20px_rgb(239_68_68/0.1)] transition-all hover:bg-red-500/20 hover:shadow-[0_0_28px_rgb(239_68_68/0.2)] active:scale-[0.98]"
-    >
-      Retry
-    </button>
-  )
+export interface JarvisCtx {
+  state: JarvisState
+  label: string
+  sub: string
+  acao: string
+  ultimoEvento: string
+  logs: LogEntry[]
+  retryVisible: boolean
+  steps: string[] | null
+  processados: number
+  fila: number
 }
 
-// ─── Inner page (needs search params) ─────────────────────────────────────
+const INITIAL: JarvisCtx = {
+  state: 'aguardando',
+  label: 'AGUARDANDO',
+  sub: 'Aguardando evento',
+  acao: 'Nenhuma acao',
+  ultimoEvento: 'Aguardando...',
+  logs: [{ id: 0, text: 'aguardando evento...', type: 'info' }],
+  retryVisible: false,
+  steps: null,
+  processados: 0,
+  fila: 0,
+}
 
-function PainelContent() {
-  const searchParams = useSearchParams()
+let _lid = 1
+function mkLog(text: string, type: LogEntry['type'] = 'info'): LogEntry {
+  return { id: _lid++, text, type }
+}
 
-  // URL params
-  const urlSource = searchParams.get('source')
-  const urlClientId = searchParams.get('client_id')
-  const urlTestId = searchParams.get('test_id')
-  const hasUrlContext = !!(urlSource || urlClientId || urlTestId)
+function pushLogs(prev: JarvisCtx, ...entries: LogEntry[]): JarvisCtx {
+  return { ...prev, logs: [...prev.logs, ...entries].slice(-5) }
+}
 
-  // Jarvis state
-  const [jarvisState, setJarvisState] = useState<JarvisState>('idle')
-  const [currentAction, setCurrentAction] = useState<string>('Aguardando evento do Painel 1')
-  const [lastEvent, setLastEvent] = useState<string>('Nenhum evento recebido')
-  const [consoleLogs, setConsoleLogs] = useState<string[]>([])
-  const [activeEventId, setActiveEventId] = useState<string | null>(null)
-  const [showRetry, setShowRetry] = useState(false)
-  const [steps, setSteps] = useState<string[]>([])
-  const [contextData, setContextData] = useState<ContextData>({
-    source: urlSource,
-    clientId: urlClientId,
-    testId: urlTestId,
-    flow: urlTestId ? 'Envio de teste' : undefined,
-    client: urlClientId ? 'Carregando...' : undefined,
-    status: hasUrlContext ? 'Missão recebida' : undefined,
+function PainelInner() {
+  const params = useSearchParams()
+  const clientId = params.get('client_id')
+  const testId = params.get('test_id')
+  const source = params.get('source')
+
+  const [ctx, setCtx] = useState<JarvisCtx>(() => {
+    if (source === 'painel1') {
+      return {
+        ...INITIAL,
+        state: 'recebendo',
+        label: 'RECEBENDO',
+        sub: 'Recebendo contexto do Painel 1',
+        acao: 'Aguardando missao do Painel 1',
+        ultimoEvento: `Contexto recebido${testId ? ` · Teste #${testId}` : ''}`,
+        logs: [
+          mkLog('CONTEXT_RECEIVED', 'success'),
+          mkLog(`SOURCE=painel1${testId ? `  TEST_ID=${testId}` : ''}`, 'info'),
+          mkLog('AWAITING_FLOW_SELECTION', 'info'),
+        ],
+      }
+    }
+    return INITIAL
   })
 
-  // Se vier params da URL, iniciar em "receiving"
-  useEffect(() => {
-    if (hasUrlContext) {
-      setJarvisState('receiving')
-      setCurrentAction('Lendo contexto do Painel 1')
-      setLastEvent(`Missão recebida via URL — source=${urlSource ?? '?'}`)
-      setConsoleLogs(['CONTEXT_RECEIVED', 'PARSING_URL_PARAMS', 'FLOW_SUGGESTED_TEST'])
+  const [activeTab, setActiveTab] = useState<'central' | 'falhas' | 'console' | 'historico'>('central')
 
-      // Simula transição para interpreting
-      const t = setTimeout(() => {
-        setJarvisState('interpreting')
-        setCurrentAction('Interpretando missão do Painel 1')
-        setConsoleLogs((prev) => [...prev, 'INTENT_ANALYSIS_STARTED'])
-      }, 1800)
-      return () => clearTimeout(t)
+  const dispatch = useCallback((next: Partial<JarvisCtx> & { newLogs?: LogEntry[] }) => {
+    setCtx(prev => {
+      const { newLogs, ...rest } = next
+      const merged = { ...prev, ...rest }
+      return newLogs?.length ? pushLogs(merged, ...newLogs) : merged
+    })
+  }, [])
+
+  const handleEvent = useCallback((eventKey: string) => {
+    switch (eventKey) {
+      case 'tvlg':
+        dispatch({
+          state: 'executando', label: 'EXECUTANDO', sub: 'Preparando instalacao LG',
+          acao: 'Preparando instalacao LG', ultimoEvento: 'Cliente respondeu: TV LG',
+          retryVisible: false, steps: null, processados: ctx.processados + 1,
+          newLogs: [mkLog('DEVICE_DETECTED_LG', 'success'), mkLog('INSTALLATION_FLOW_SELECTED', 'info'), mkLog('INSTALLATION_READY', 'info')],
+        }); break
+      case 'audio':
+        dispatch({
+          state: 'falha', label: 'FALHA', sub: 'Audio 4 falhou',
+          acao: 'Reenviar audio 4', ultimoEvento: 'Audio falhou',
+          retryVisible: true, steps: null, fila: ctx.fila + 1,
+          newLogs: [mkLog('WELCOME_AUDIO_4_FAILED', 'error'), mkLog('RETRY_READY', 'warn')],
+        }); break
+      case 'paguei':
+        dispatch({
+          state: 'interpretando', label: 'INTERPRETANDO', sub: 'Confirmando pagamento',
+          acao: 'Verificando confirmacao', ultimoEvento: 'Ja paguei',
+          retryVisible: false, steps: null,
+          newLogs: [mkLog('PAYMENT_CLAIM_RECEIVED', 'info'), mkLog('AWAITING_CONFIRMATION', 'warn')],
+        }); break
+      case 'ativar':
+        dispatch({
+          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando ativacao',
+          acao: 'Verificando elegibilidade', ultimoEvento: 'Ativar',
+          retryVisible: false, steps: null,
+          newLogs: [mkLog('INTENT_DETECTED=ATIVAR', 'info'), mkLog('ELIGIBILITY_CHECK', 'warn')],
+        }); break
+      case 'xcloud':
+        dispatch({
+          state: 'executando', label: 'EXECUTANDO', sub: 'Orquestrando recriacao',
+          acao: 'Recriar device XCloud', ultimoEvento: 'Recriar XCloud',
+          retryVisible: false, fila: ctx.fila + 1,
+          steps: ['Localizar', 'Desativar', 'Excluir', 'Recriar', 'Vincular Xtream', 'Confirmar RELOAD'],
+          newLogs: [mkLog('XCLOUD_RECREATE_INIT', 'warn'), mkLog('DEVICE_LOCATE_START', 'info')],
+        }); break
+      case 'falha_xcloud':
+        dispatch({
+          state: 'falha', label: 'FALHA', sub: 'Falha no XCloud',
+          acao: 'Verificar logs XCloud', ultimoEvento: 'Falha XCloud',
+          retryVisible: true, steps: null, fila: ctx.fila + 1,
+          newLogs: [mkLog('XCLOUD_ERROR_DETECTED', 'error'), mkLog('RETRY_AVAILABLE', 'warn')],
+        }); break
+      case 'retry':
+        dispatch({
+          state: 'reenvio', label: 'REENVIO', sub: 'Reenvio preparado',
+          acao: 'Executando retry...', ultimoEvento: 'Retry acionado',
+          retryVisible: false, processados: ctx.processados + 1, fila: Math.max(0, ctx.fila - 1),
+          newLogs: [mkLog('RETRY_TRIGGERED', 'warn'), mkLog('FLOW_RESTARTED', 'info')],
+        })
+        setTimeout(() => setCtx(prev => ({
+          ...prev, state: 'concluido', label: 'CONCLUIDO', sub: 'Fluxo concluido',
+          acao: 'Aguardando proximo evento',
+          logs: [...prev.logs, mkLog('FLOW_COMPLETED', 'success')].slice(-5),
+        })), 2200)
+        break
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [ctx, dispatch])
 
-  const handleEvent = useCallback((ev: EventPayload) => {
-    setActiveEventId(ev.id)
-    setJarvisState(ev.state)
-    setCurrentAction(ev.action)
-    setLastEvent(ev.event)
-    setConsoleLogs(ev.logs)
-    setShowRetry(ev.showRetry ?? false)
-    setSteps(ev.steps ?? [])
-    setContextData((prev) => ({
-      ...prev,
-      ...ev.context,
-    }))
+  const handleReset = useCallback(() => {
+    _lid = 1
+    setCtx({ ...INITIAL, logs: [mkLog('sistema reiniciado', 'info')] })
   }, [])
-
-  const handleRetry = useCallback(() => {
-    setJarvisState('executing')
-    setCurrentAction('Executando retry do áudio 4')
-    setLastEvent('Retry iniciado pelo operador')
-    setConsoleLogs((prev) => [...prev, 'RETRY_INITIATED', 'AUDIO_4_RESEND_STARTED'])
-    setShowRetry(false)
-  }, [])
-
-  const hasContext =
-    hasUrlContext ||
-    !!(contextData.flow || contextData.device || contextData.app)
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-border bg-card/60 px-5 py-3 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-500/40 bg-blue-500/10 shadow-[0_0_12px_rgb(59_130_246/0.15)]">
-            <span className="font-mono text-[11px] font-bold text-blue-400">J2</span>
-          </div>
-          <div>
-            <p className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
-              Central Play Plus
-            </p>
-            <p className="text-xs font-semibold leading-tight text-foreground">
-              Painel 2 · Operação em Tempo Real
-            </p>
-          </div>
-        </div>
+    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      <Sidebar active={activeTab} onNav={setActiveTab} source={source} clientId={clientId} testId={testId} />
 
-        <div className="flex items-center gap-3">
-          {urlSource === 'painel1' && (
-            <span className="hidden rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-cyan-400 sm:inline-flex">
-              Origem: Painel 1
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+        {/* Top bar */}
+        <header className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b border-border/40 bg-background/80 px-5 backdrop-blur-sm">
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center gap-1.5 rounded-full border border-[#22c55e]/40 bg-[#22c55e]/10 px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-widest text-[#22c55e]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e] shadow-[0_0_6px_#22c55e]" />
+              ATIVO
             </span>
-          )}
-          <a
-            href="https://painel.centralplayplus.com.br"
-            className="rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-xs text-muted-foreground transition-all hover:border-blue-500/40 hover:text-foreground"
-          >
-            &larr; Gestao
-          </a>
-        </div>
-      </header>
+            <span className="font-mono text-[13px] font-semibold text-foreground">Central Play</span>
+            <span className="rounded-md bg-[#3b82f6]/20 px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide text-[#3b82f6]">Plus</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground sm:inline">
+              Tempo real
+            </span>
+            <a
+              href="https://painel.centralplayplus.com.br"
+              title="Voltar para Gestao"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-[#3b82f6]/20 font-mono text-[10px] font-bold text-[#3b82f6] ring-1 ring-[#3b82f6]/30 transition-all hover:bg-[#3b82f6]/30"
+            >
+              JS
+            </a>
+          </div>
+        </header>
 
-      {/* Main content */}
-      <main className="mx-auto flex w-full max-w-md flex-1 flex-col gap-5 px-5 py-6">
-        {/* Jarvis protagonista */}
-        <JarvisCore
-          state={jarvisState}
-          currentAction={currentAction}
-          lastEvent={lastEvent}
-        />
+        {/* Canvas central */}
+        <main className="relative flex flex-1 items-center justify-center overflow-hidden">
+          {/* Partículas */}
+          <Particles />
 
-        {/* Contexto atual (só aparece quando há dados) */}
-        <ContextCard data={contextData} visible={hasContext} />
+          {/* Painel flutuante esquerdo */}
+          <div className="absolute left-5 top-1/2 z-10 w-44 -translate-y-1/2">
+            <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+              <IconBolt />
+              Ultimo Evento
+            </p>
+            <div className="rounded-xl border border-border/50 bg-card/70 px-3 py-2.5 shadow-[0_4px_24px_rgb(0_0_0/0.3)] backdrop-blur-sm">
+              <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed text-foreground/80">
+                {ctx.ultimoEvento}
+              </p>
+            </div>
+          </div>
 
-        {/* Etapas (XCloud / Boas-vindas) */}
-        <StepsOverlay steps={steps} active={steps.length > 0} />
+          {/* Painel flutuante direito */}
+          <div className="absolute right-5 top-1/2 z-10 w-44 -translate-y-1/2 text-right">
+            <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground">
+              Acao Atual
+              <IconPlay />
+            </p>
+            <div className="rounded-xl border border-border/50 bg-card/70 px-3 py-2.5 shadow-[0_4px_24px_rgb(0_0_0/0.3)] backdrop-blur-sm">
+              <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed text-foreground/80">
+                {ctx.acao}
+              </p>
+            </div>
+          </div>
 
-        {/* Retry */}
-        {showRetry && <RetryButton onRetry={handleRetry} />}
+          {/* Orb */}
+          <JarvisOrb ctx={ctx} />
+        </main>
 
-        {/* Console mínimo */}
-        <ConsoleLog lines={consoleLogs} />
+        {/* Barra inferior */}
+        <BottomBar ctx={ctx} onEvent={handleEvent} />
 
-        {/* Eventos rápidos */}
-        <EventButtons activeId={activeEventId} onEvent={handleEvent} />
-      </main>
-
-      {/* Footer mínimo */}
-      <footer className="border-t border-border bg-card/30 px-5 py-3 text-center font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground/30">
-        Jarvis &middot; Executor de Fluxos &middot; v2
-      </footer>
+        {/* Barra de status */}
+        <StatusBar ctx={ctx} onReset={handleReset} />
+      </div>
     </div>
   )
 }
 
-// ─── Page wrapper com Suspense (necessário para useSearchParams) ──────────
+function Particles() {
+  const dots = [
+    { x: 12, y: 18, s: 2 }, { x: 80, y: 10, s: 1.5 }, { x: 47, y: 6, s: 2.5 },
+    { x: 91, y: 33, s: 1 }, { x: 6, y: 58, s: 1.5 }, { x: 77, y: 72, s: 1 },
+    { x: 33, y: 87, s: 2 }, { x: 60, y: 48, s: 1 }, { x: 88, y: 82, s: 1.5 },
+    { x: 20, y: 43, s: 1 }, { x: 52, y: 93, s: 1 }, { x: 68, y: 23, s: 1.5 },
+    { x: 40, y: 30, s: 1 }, { x: 25, y: 70, s: 1.5 },
+  ]
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      {dots.map((d, i) => (
+        <span
+          key={i}
+          className="absolute rounded-full bg-[#3b82f6]/25"
+          style={{ left: `${d.x}%`, top: `${d.y}%`, width: d.s, height: d.s }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function IconBolt() {
+  return (
+    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  )
+}
+
+function IconPlay() {
+  return (
+    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
 
 export default function Page() {
   return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen items-center justify-center bg-background">
-          <span className="font-mono text-xs text-muted-foreground">
-            Inicializando Jarvis<span className="animate-blink">_</span>
-          </span>
-        </div>
-      }
-    >
-      <PainelContent />
+    <Suspense fallback={
+      <div className="flex h-screen items-center justify-center bg-background">
+        <span className="font-mono text-xs text-muted-foreground">
+          Inicializando<span className="animate-blink">_</span>
+        </span>
+      </div>
+    }>
+      <PainelInner />
     </Suspense>
   )
 }
