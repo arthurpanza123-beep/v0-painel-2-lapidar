@@ -1,6 +1,6 @@
 'use client'
 
-import type { JarvisCtx } from '@/app/page'
+import type { JarvisCtx } from '@/lib/types/ui'
 
 interface Props {
   ctx: JarvisCtx
