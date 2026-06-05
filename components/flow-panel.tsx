@@ -1,6 +1,6 @@
 'use client'
 
-import type { JarvisCtx, FlowKey } from '@/app/page'
+import type { JarvisCtx, FlowKey } from '@/lib/types/ui'
 
 interface Props {
   ctx: JarvisCtx

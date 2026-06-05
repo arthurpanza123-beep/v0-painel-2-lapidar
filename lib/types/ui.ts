@@ -1,96 +1,78 @@
 /**
  * Tipos para o UI do Painel 2.
+ * Estes tipos sao usados pelos componentes UI (sidebar, bottom-bar, jarvis-orb, flow-panel, status-bar).
  */
 
 // Estados do Jarvis
-export type JarvisState = 
-  | 'idle' 
-  | 'receiving' 
-  | 'interpreting' 
-  | 'detecting' 
-  | 'preparing' 
-  | 'executing' 
-  | 'validating' 
-  | 'completed' 
-  | 'failed' 
-  | 'retry'
+export type JarvisState =
+  | 'aguardando'
+  | 'recebendo'
+  | 'interpretando'
+  | 'preparando'
+  | 'executando'
+  | 'falha'
+  | 'reenvio'
+  | 'concluido'
 
-// Log entry
-export type LogEntry = {
+// Tipos de log
+export type LogType = 'info' | 'warn' | 'error' | 'success'
+
+// Entry de log
+export interface LogEntry {
   id: string
-  timestamp: Date
-  level: 'info' | 'success' | 'warning' | 'error'
-  code: string
-  detail?: string
+  type: LogType
+  text: string
+  ts: number
 }
 
-// Item na fila
-export type QueueItem = {
-  id: string
-  simId: string
+// Acao sugerida no FlowPanel
+export interface AcaoSugerida {
   label: string
-  addedAt: Date
-  status: 'queued' | 'processing' | 'completed' | 'failed'
+  variant: 'primary' | 'warn' | 'danger' | 'muted'
 }
 
-// Falha registrada
-export type FailureEntry = {
-  id: string
-  timestamp: Date
-  code: string
-  message: string
-  resolved: boolean
-}
+// Keys de flow
+export type FlowKey =
+  | 'test_created'
+  | 'test_expired'
+  | 'renewal_created'
+  | 'app_swap'
+  | 'second_screen'
+  | 'installation'
+  | 'boas_vindas'
+  | 'xcloud_remove_device'
+  | 'xcloud_recreate_device'
+  | 'problem_created'
+  | 'charge_customer'
 
-// Resultado do Evolution
-export type EvolutionUiResult = {
-  ok?: boolean
-  code?: string
-  message?: string
-  dryRun?: boolean
-  preview?: string
-  flags?: { enabled?: boolean; dryRun?: boolean; configured?: boolean }
-  logs?: Array<{ code?: string; message?: string }>
-}
+// Tabs de navegacao
+export type NavTab =
+  | 'central'
+  | 'falhas'
+  | 'console'
+  | 'historico'
+  | 'configuracoes'
 
-// Configuracao de flow
-export type FlowConfig = {
-  module: string
-  preview: string
-  states: { state: JarvisState; text: string; duration: number }[]
-  logs: { level: LogEntry['level']; code: string; detail?: string }[]
-}
-
-// Navegacao
-export type NavTab = 
-  | 'operations' 
-  | 'queue' 
-  | 'history' 
-  | 'analytics' 
-  | 'flows' 
-  | 'devices' 
-  | 'config' 
-  | 'monitor'
-
-// Flow keys (re-export)
-export type { FlowKey } from '@/lib/types/flow'
-
-// Contexto do Jarvis
+// Contexto do Jarvis usado pelos componentes
 export interface JarvisCtx {
   state: JarvisState
-  stateText: string
+  label: string
+  sub: string
+  acao: string
+  ultimoEvento: string
   logs: LogEntry[]
-  queue: QueueItem[]
-  failures: FailureEntry[]
-  activeFlow: string | null
-  preview: string
-  evolutionResult: EvolutionUiResult | null
-  currentStep?: { step: string; index: number; total: number } | null
-}
-
-// Props de step
-export interface WelcomeStepInfo {
-  step: string
-  index: number
-  total: number
+  retryVisible: boolean
+  steps?: string[]
+  processados: number
+  fila: number
+  // Flow context
+  flow: FlowKey | null
+  acoes: AcaoSugerida[]
+  // Dados de contexto do flow
+  appAtual?: string
+  appNovo?: string
+  painel?: string
+  dispositivo?: string
+  clienteNome?: string
+  observacao?: string
 }

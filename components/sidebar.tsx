@@ -1,6 +1,6 @@
 'use client'
 
-import type { NavTab, FlowKey } from '@/app/page'
+import type { NavTab, FlowKey } from '@/lib/types/ui'
 
 interface Props {
   active: NavTab

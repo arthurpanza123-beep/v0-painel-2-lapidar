@@ -1,6 +1,6 @@
 'use client'
 
-import type { JarvisCtx, LogEntry } from '@/app/page'
+import type { JarvisCtx, LogEntry } from '@/lib/types/ui'
 
 interface Props {
   ctx: JarvisCtx
