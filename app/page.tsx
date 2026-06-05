@@ -1,669 +1,1338 @@
-'use client'
+"use client"
 
-import { Suspense, useCallback, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { JarvisOrb } from '@/components/jarvis-orb'
-import { Sidebar } from '@/components/sidebar'
-import { BottomBar } from '@/components/bottom-bar'
-import { StatusBar } from '@/components/status-bar'
-import { FlowPanel } from '@/components/flow-panel'
-import { ConfigPanel } from '@/components/config-panel'
+import { Suspense, useState, useCallback, useEffect, useRef } from "react"
+import { useSearchParams } from "next/navigation"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { 
+  Activity, AlertTriangle, Terminal, Settings, Zap, Tv, MessageSquare, 
+  RefreshCw, CreditCard, Sparkles, HelpCircle, Clock, History, Monitor, BarChart3,
+  User, Layers, Play, Pause, CheckCircle2, XCircle, Loader2, ListOrdered, Cloud
+} from "lucide-react"
 
-export type JarvisState =
-  | 'aguardando'
-  | 'recebendo'
-  | 'interpretando'
-  | 'preparando'
-  | 'confirmando'
-  | 'executando'
-  | 'simulando'
-  | 'concluido'
-  | 'falha'
-  | 'reenvio'
-
-export type FlowKey =
-  | null
-  | 'test_created'
-  | 'test_expired'
-  | 'renewal_created'
-  | 'app_swap'
-  | 'second_screen'
-  | 'installation'
-  | 'boas_vindas'
-  | 'xcloud_remove_device'
-  | 'xcloud_recreate_device'
-  | 'problem_created'
-  | 'charge_customer'
-
-export interface LogEntry {
-  id: number
-  text: string
-  type: 'info' | 'warn' | 'error' | 'success'
+// Types
+type JarvisState = "idle" | "receiving" | "interpreting" | "detecting" | "preparing" | "executing" | "validating" | "completed" | "failed" | "retry"
+type LogEntry = { id: string; timestamp: Date; level: "info" | "success" | "warning" | "error"; code: string; detail?: string }
+type QueueItem = { id: string; simId: string; label: string; addedAt: Date; status: "queued" | "processing" | "completed" | "failed" }
+type FailureEntry = { id: string; timestamp: Date; code: string; message: string; resolved: boolean }
+type EvolutionUiResult = {
+  ok?: boolean
+  code?: string
+  message?: string
+  dryRun?: boolean
+  preview?: string
+  flags?: { enabled?: boolean; dryRun?: boolean; configured?: boolean }
+  logs?: Array<{ code?: string; message?: string }>
 }
 
-export interface ActionItem {
-  label: string
-  variant: 'primary' | 'warn' | 'danger' | 'muted'
+type FlowConfig = {
+  module: string
+  preview: string
+  states: { state: JarvisState; text: string; duration: number }[]
+  logs: { level: LogEntry["level"]; code: string; detail?: string }[]
 }
 
-export interface JarvisCtx {
-  state: JarvisState
-  label: string
-  sub: string
-  acao: string
-  ultimoEvento: string
-  logs: LogEntry[]
-  retryVisible: boolean
-  steps: string[] | null
-  processados: number
-  fila: number
-  flow: FlowKey
-  // contexto do cliente/flow
-  clienteNome: string | null
-  appAtual: string | null
-  appNovo: string | null
-  painel: string | null
-  dispositivo: string | null
-  acoes: ActionItem[]
+function flow(module: string, preview: string, states: FlowConfig["states"], logs: FlowConfig["logs"]): FlowConfig {
+  return { module, preview, states, logs }
 }
 
-const INITIAL: JarvisCtx = {
-  state: 'aguardando',
-  label: 'AGUARDANDO',
-  sub: 'Aguardando evento',
-  acao: 'Nenhuma acao',
-  ultimoEvento: 'Aguardando...',
-  logs: [{ id: 0, text: 'aguardando evento...', type: 'info' }],
-  retryVisible: false,
-  steps: null,
-  processados: 0,
-  fila: 0,
-  flow: null,
-  clienteNome: null,
-  appAtual: null,
-  appNovo: null,
-  painel: null,
-  dispositivo: null,
-  acoes: [],
+// Flow configurations. Todos os fluxos abaixo sao simulados: nao enviam WhatsApp e nao chamam Evolution.
+const FLOWS: Record<string, FlowConfig> = {
+  test_created: flow(
+    "Teste",
+    "Preview: teste criado, orientar instalacao e acompanhar 1h15 sem disparo real.",
+    [
+      { state: "receiving", text: "Recebendo teste criado", duration: 400 },
+      { state: "interpreting", text: "Lendo contexto do Painel 1", duration: 500 },
+      { state: "preparing", text: "Preparando preview de boas-vindas", duration: 600 },
+      { state: "completed", text: "Preview pronto", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "FLOW_TEST_CREATED", detail: "Evento recebido via simulador/query" },
+      { level: "info", code: "WHATSAPP_PREVIEW_ONLY", detail: "Nenhum envio real executado" },
+      { level: "success", code: "TEMPLATE_READY", detail: "Mensagem visual preparada" },
+    ],
+  ),
+  test_expired: flow(
+    "Teste expirado",
+    "Preview: aviso de expiracao, figurinha, entrar no painel e remover XCloud se aplicavel.",
+    [
+      { state: "receiving", text: "Teste expirado detectado", duration: 400 },
+      { state: "preparing", text: "Preparando aviso e figurinha", duration: 650 },
+      { state: "executing", text: "Montando acoes do operador", duration: 650 },
+      { state: "completed", text: "Checklist visual pronto", duration: 1800 },
+    ],
+    [
+      { level: "warning", code: "TEST_EXPIRED", detail: "Expiracao simulada" },
+      { level: "info", code: "STICKER_PREVIEW", detail: "Figurinha apenas em preview" },
+      { level: "info", code: "ACTION_ENTER_PANEL", detail: "Botao visual para entrar no painel" },
+      { level: "info", code: "ACTION_REMOVE_XCLOUD", detail: "Remocao XCloud somente simulada" },
+    ],
+  ),
+  renewal_created: flow(
+    "Renovacao",
+    "Preview: cobranca de renovacao com dados visuais e sem envio real.",
+    [
+      { state: "receiving", text: "Renovacao criada", duration: 400 },
+      { state: "interpreting", text: "Conferindo plano e vencimento", duration: 500 },
+      { state: "preparing", text: "Preparando cobranca visual", duration: 650 },
+      { state: "completed", text: "Preview de renovacao pronto", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "RENEWAL_CREATED", detail: "Renovacao adicionada ao console" },
+      { level: "info", code: "CHARGE_PREVIEW", detail: "Cobranca nao enviada" },
+      { level: "success", code: "OPERATOR_READY", detail: "Operador pode copiar manualmente" },
+    ],
+  ),
+  app_swap: flow(
+    "Troca de app",
+    "Preview: instrucoes de troca de aplicativo e midias sugeridas.",
+    [
+      { state: "receiving", text: "Pedido de troca recebido", duration: 400 },
+      { state: "detecting", text: "Identificando app atual", duration: 500 },
+      { state: "preparing", text: "Selecionando novo tutorial", duration: 650 },
+      { state: "completed", text: "Troca preparada", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "APP_SWAP", detail: "Fluxo visual de troca" },
+      { level: "info", code: "MEDIA_TEMPLATE_SELECTED", detail: "Midia sugerida, sem envio" },
+      { level: "success", code: "SWAP_PREVIEW_READY", detail: "Instrucoes prontas" },
+    ],
+  ),
+  second_screen: flow(
+    "Segunda tela",
+    "Preview: orientar segunda tela, limites e proximo passo de ativacao.",
+    [
+      { state: "receiving", text: "Solicitacao de segunda tela", duration: 400 },
+      { state: "interpreting", text: "Validando contexto visual", duration: 500 },
+      { state: "preparing", text: "Preparando orientacao", duration: 650 },
+      { state: "completed", text: "Preview de segunda tela pronto", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "SECOND_SCREEN", detail: "Pedido recebido" },
+      { level: "warning", code: "MANUAL_CONFIRMATION", detail: "Sem ativacao automatica" },
+      { level: "success", code: "GUIDE_READY", detail: "Orientacao visual pronta" },
+    ],
+  ),
+  problem_created: flow(
+    "Problema",
+    "Preview: problema criado, prompt de conhecimento e proximas acoes para suporte.",
+    [
+      { state: "receiving", text: "Problema recebido", duration: 400 },
+      { state: "interpreting", text: "Classificando ocorrencia", duration: 500 },
+      { state: "preparing", text: "Gerando prompt operacional", duration: 700 },
+      { state: "completed", text: "Prompt pronto", duration: 1800 },
+    ],
+    [
+      { level: "warning", code: "PROBLEM_CREATED", detail: "Ocorrencia registrada visualmente" },
+      { level: "info", code: "CODEX_PROMPT_READY", detail: "Prompt para suporte/Painel 2" },
+      { level: "success", code: "KNOWLEDGE_ATTACHED", detail: "Conhecimento sugerido" },
+    ],
+  ),
+  xcloud_remove_device: flow(
+    "XCloud",
+    "Preview: remover device XCloud com confirmacao manual do operador.",
+    [
+      { state: "receiving", text: "Remocao solicitada", duration: 400 },
+      { state: "detecting", text: "Localizando device", duration: 600 },
+      { state: "preparing", text: "Aguardando confirmacao manual", duration: 700 },
+      { state: "completed", text: "Remocao simulada pronta", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "XCLOUD_REMOVE_DEVICE", detail: "Nenhuma automacao real disparada" },
+      { level: "warning", code: "CONFIRMATION_REQUIRED", detail: "Operador decide no Painel 1/XCloud" },
+      { level: "success", code: "CHECKLIST_READY", detail: "Checklist visual pronto" },
+    ],
+  ),
+  xcloud_recreate_device: flow(
+    "XCloud",
+    "Preview: recriar device XCloud com localizar, desativar, excluir, recriar e confirmar RELOAD.",
+    [
+      { state: "receiving", text: "Recriacao solicitada", duration: 400 },
+      { state: "detecting", text: "Localizando device", duration: 600 },
+      { state: "executing", text: "Simulando desativacao", duration: 650 },
+      { state: "executing", text: "Simulando exclusao", duration: 650 },
+      { state: "preparing", text: "Preparando recriacao", duration: 700 },
+      { state: "validating", text: "Confirmando RELOAD visual", duration: 550 },
+      { state: "completed", text: "Recriacao simulada pronta", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "XCLOUD_RECREATE_DEVICE", detail: "Fluxo visual iniciado" },
+      { level: "info", code: "XCLOUD_DEVICE_FOUND", detail: "Device key lida do contexto" },
+      { level: "info", code: "XCLOUD_DEACTIVATE_PREVIEW", detail: "Sem Playwright real aqui" },
+      { level: "info", code: "XCLOUD_DELETE_PREVIEW", detail: "Sem exclusao real" },
+      { level: "success", code: "XCLOUD_RELOAD_PREVIEW", detail: "Checklist pronto" },
+    ],
+  ),
+  charge_customer: flow(
+    "Cobranca",
+    "Preview: cobrar cliente com template, valor e vencimento visuais.",
+    [
+      { state: "receiving", text: "Cobranca solicitada", duration: 400 },
+      { state: "interpreting", text: "Lendo valor e vencimento", duration: 500 },
+      { state: "preparing", text: "Preparando mensagem de cobranca", duration: 650 },
+      { state: "completed", text: "Preview de cobranca pronto", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "CHARGE_CUSTOMER", detail: "Cobranca montada no preview" },
+      { level: "info", code: "NO_EVOLUTION_CALL", detail: "Sem chamada HTTP" },
+      { level: "success", code: "COPY_READY", detail: "Texto pronto para copia manual" },
+    ],
+  ),
+  install_requested: flow(
+    "Instalacao",
+    "Preview: pedido de instalacao com midias e passos sugeridos.",
+    [
+      { state: "receiving", text: "Pedido de instalacao", duration: 400 },
+      { state: "detecting", text: "Identificando aparelho", duration: 550 },
+      { state: "preparing", text: "Selecionando tutorial", duration: 650 },
+      { state: "completed", text: "Instalacao preparada", duration: 1800 },
+    ],
+    [
+      { level: "info", code: "INSTALL_REQUESTED", detail: "Fluxo visual de instalacao" },
+      { level: "info", code: "MEDIA_PREVIEW_READY", detail: "Midias sugeridas" },
+      { level: "success", code: "INSTALL_GUIDE_READY", detail: "Passos prontos" },
+    ],
+  ),
+  "tv-lg": {
+    module: "Instalacao",
+    preview: "Preview legado: instalacao LG simulada.",
+    states: [
+      { state: "receiving", text: "Recebendo resposta", duration: 500 },
+      { state: "interpreting", text: "Interpretando intent", duration: 600 },
+      { state: "detecting", text: "Detectando LG TV", duration: 500 },
+      { state: "executing", text: "Preparando instalacao", duration: 700 },
+      { state: "completed", text: "Instalacao LG pronta", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "DEVICE_DETECT", detail: "LG Smart TV identificada" },
+      { level: "info", code: "INTENT_INSTALL", detail: "Fluxo de instalacao iniciado" },
+      { level: "success", code: "DISPATCH_OK", detail: "Instrucoes enviadas com sucesso" },
+    ],
+  },
+  "audio-falhou": {
+    module: "Reenvio",
+    preview: "Preview legado: reenvio visual de audio.",
+    states: [
+      { state: "receiving", text: "Falha detectada", duration: 400 },
+      { state: "failed", text: "Audio 4 falhou", duration: 600 },
+      { state: "retry", text: "Preparando retry", duration: 500 },
+      { state: "executing", text: "Reenviando audio", duration: 600 },
+      { state: "completed", text: "Audio 4 reenviado", duration: 2000 },
+    ],
+    logs: [
+      { level: "error", code: "AUDIO_FAIL", detail: "Falha no envio do audio 4" },
+      { level: "warning", code: "RETRY_INIT", detail: "Iniciando tentativa de reenvio" },
+      { level: "success", code: "AUDIO_SENT", detail: "Audio reenviado com sucesso" },
+    ],
+  },
+  "ja-paguei": {
+    module: "Cobranca",
+    preview: "Preview legado: confirmacao visual de pagamento.",
+    states: [
+      { state: "receiving", text: "Verificando pagamento", duration: 500 },
+      { state: "executing", text: "Confirmando status", duration: 600 },
+      { state: "completed", text: "Pagamento confirmado", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "PAYMENT_CHECK", detail: "Verificando status do pagamento" },
+      { level: "success", code: "PAYMENT_OK", detail: "Pagamento confirmado no sistema" },
+    ],
+  },
+  "quero-ativar": {
+    module: "Boas-vindas",
+    preview: "Preview legado: ativacao visual sem envio.",
+    states: [
+      { state: "receiving", text: "Solicitacao recebida", duration: 400 },
+      { state: "executing", text: "Iniciando ativacao", duration: 800 },
+      { state: "completed", text: "Boas-vindas enviado", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "ACTIVATION", detail: "Nova ativacao solicitada" },
+      { level: "success", code: "WELCOME_SENT", detail: "Fluxo de boas-vindas disparado" },
+    ],
+  },
+  "lista-nao-carrega": {
+    module: "Suporte",
+    preview: "Preview legado: suporte visual para lista.",
+    states: [
+      { state: "receiving", text: "Problema reportado", duration: 400 },
+      { state: "executing", text: "Buscando solucao", duration: 700 },
+      { state: "completed", text: "Suporte enviado", duration: 2000 },
+    ],
+    logs: [
+      { level: "warning", code: "ISSUE_LIST", detail: "Problema com lista reportado" },
+      { level: "success", code: "SUPPORT_SENT", detail: "Instrucoes de suporte enviadas" },
+    ],
+  },
+  "teste-gerado": {
+    module: "Teste",
+    preview: "Preview legado: teste simulado.",
+    states: [
+      { state: "receiving", text: "Teste iniciado", duration: 400 },
+      { state: "executing", text: "Executando teste", duration: 500 },
+      { state: "completed", text: "Teste concluido", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "TEST_RUN", detail: "Teste #0001 em execucao" },
+      { level: "success", code: "TEST_OK", detail: "Teste finalizado com sucesso" },
+    ],
+  },
+  "recriar-xcloud": {
+    module: "XCloud",
+    preview: "Preview legado: recriacao visual XCloud.",
+    states: [
+      { state: "receiving", text: "Solicitacao recebida", duration: 400 },
+      { state: "detecting", text: "Localizando device", duration: 600 },
+      { state: "executing", text: "Desativando device", duration: 700 },
+      { state: "executing", text: "Excluindo device", duration: 600 },
+      { state: "preparing", text: "Recriando device", duration: 800 },
+      { state: "executing", text: "Vinculando Xtream", duration: 700 },
+      { state: "validating", text: "Confirmando RELOAD", duration: 500 },
+      { state: "completed", text: "Device XCloud recriado", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "XCLOUD_RECREATE_REQ", detail: "Solicitacao de recriacao recebida" },
+      { level: "info", code: "XCLOUD_DEVICE_FOUND", detail: "Device key localizada" },
+      { level: "info", code: "XCLOUD_DEACTIVATED", detail: "Device desativado com sucesso" },
+      { level: "info", code: "XCLOUD_DELETED", detail: "Device excluido do sistema" },
+      { level: "info", code: "XCLOUD_RECREATED", detail: "Novo device cadastrado" },
+      { level: "success", code: "XCLOUD_RELOAD_OK", detail: "RELOAD confirmado" },
+    ],
+  },
+  "falha-xcloud": {
+    module: "XCloud",
+    preview: "Preview legado: falha visual XCloud com retry.",
+    states: [
+      { state: "receiving", text: "Solicitacao recebida", duration: 400 },
+      { state: "detecting", text: "Localizando device", duration: 500 },
+      { state: "executing", text: "Desativando device", duration: 600 },
+      { state: "failed", text: "Falha ao deletar device", duration: 800 },
+      { state: "retry", text: "Retry Delete", duration: 600 },
+      { state: "executing", text: "Excluindo device", duration: 700 },
+      { state: "completed", text: "Device deletado apos retry", duration: 2000 },
+    ],
+    logs: [
+      { level: "info", code: "XCLOUD_RECREATE_REQ", detail: "Solicitacao de recriacao recebida" },
+      { level: "info", code: "XCLOUD_DEACTIVATED", detail: "Device desativado" },
+      { level: "error", code: "XCLOUD_DELETE_FAIL", detail: "Falha ao deletar device" },
+      { level: "warning", code: "XCLOUD_RETRY_DEL", detail: "Tentando novamente deletar" },
+      { level: "success", code: "XCLOUD_DELETED", detail: "Device excluido apos retry" },
+    ],
+  },
 }
 
-let _lid = 1
-function mkLog(text: string, type: LogEntry['type'] = 'info'): LogEntry {
-  return { id: _lid++, text, type }
+// Simulations
+const simulations = [
+  { id: "test_created", label: "Teste criado", icon: <Sparkles className="w-4 h-4" /> },
+  { id: "test_expired", label: "Teste expirado", icon: <Clock className="w-4 h-4" /> },
+  { id: "renewal_created", label: "Renovacao", icon: <RefreshCw className="w-4 h-4" /> },
+  { id: "app_swap", label: "Trocar app", icon: <Monitor className="w-4 h-4" /> },
+  { id: "second_screen", label: "Segunda tela", icon: <BarChart3 className="w-4 h-4" /> },
+  { id: "problem_created", label: "Problema", icon: <HelpCircle className="w-4 h-4" /> },
+  { id: "xcloud_remove_device", label: "Remover XCloud", icon: <Cloud className="w-4 h-4" /> },
+  { id: "xcloud_recreate_device", label: "Recriar XCloud", icon: <Cloud className="w-4 h-4" /> },
+  { id: "charge_customer", label: "Cobrar cliente", icon: <CreditCard className="w-4 h-4" /> },
+  { id: "install_requested", label: "Instalacao", icon: <Tv className="w-4 h-4" /> },
+  { id: "tv-lg", label: "TV LG", icon: <Tv className="w-4 h-4" /> },
+  { id: "audio-falhou", label: "Audio falhou", icon: <RefreshCw className="w-4 h-4" /> },
+  { id: "ja-paguei", label: "Ja paguei", icon: <CreditCard className="w-4 h-4" /> },
+  { id: "quero-ativar", label: "Ativar", icon: <Sparkles className="w-4 h-4" /> },
+  { id: "recriar-xcloud", label: "Recriar XCloud", icon: <Cloud className="w-4 h-4" /> },
+  { id: "falha-xcloud", label: "Falha XCloud", icon: <AlertTriangle className="w-4 h-4" /> },
+]
+
+// State config
+const stateConfig: Record<JarvisState, { label: string; color: string }> = {
+  idle: { label: "AGUARDANDO", color: "text-primary" },
+  receiving: { label: "RECEBENDO", color: "text-primary" },
+  interpreting: { label: "INTERPRETANDO", color: "text-primary" },
+  detecting: { label: "DETECTANDO", color: "text-chart-3" },
+  preparing: { label: "PREPARANDO", color: "text-chart-3" },
+  executing: { label: "EXECUTANDO", color: "text-chart-2" },
+  validating: { label: "VALIDANDO", color: "text-chart-3" },
+  completed: { label: "CONCLUIDO", color: "text-chart-2" },
+  failed: { label: "FALHA", color: "text-destructive" },
+  retry: { label: "RETRY", color: "text-chart-3" },
 }
 
-function pushLogs(prev: JarvisCtx, ...entries: LogEntry[]): JarvisCtx {
-  return { ...prev, logs: [...prev.logs, ...entries].slice(-5) }
-}
+// Sidebar items
+const sidebarItems = [
+  { id: "central", label: "Central", icon: Activity },
+  { id: "falhas", label: "Falhas", icon: AlertTriangle },
+  { id: "console", label: "Console", icon: Terminal },
+  { id: "historico", label: "Historico", icon: History },
+]
 
-export type NavTab = 'central' | 'falhas' | 'console' | 'historico' | 'configuracoes'
+function JarvisPageContent() {
+  const searchParams = useSearchParams()
+  const hydratedFromQuery = useRef(false)
+  const [activeTab, setActiveTab] = useState("central")
+  const [jarvisState, setJarvisState] = useState<JarvisState>("idle")
+  const [statusText, setStatusText] = useState("Aguardando evento")
+  const [lastEvent, setLastEvent] = useState<{ text: string; time: Date } | null>(null)
+  const [currentAction, setCurrentAction] = useState<string | null>(null)
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [context, setContext] = useState<{ name: string; device: string; flow: string; preview?: string; source?: string; testId?: string; clientId?: string } | null>(null)
+  const [queue, setQueue] = useState<QueueItem[]>([])
+  const [failures, setFailures] = useState<FailureEntry[]>([])
+  const [processedCount, setProcessedCount] = useState(0)
+  const [history, setHistory] = useState<{ id: string; label: string; module: string; time: Date; success: boolean }[]>([])
+  const [evolutionResult, setEvolutionResult] = useState<EvolutionUiResult | null>(null)
+  const [evolutionLoading, setEvolutionLoading] = useState(false)
+  const [evolutionPhone, setEvolutionPhone] = useState("")
+  const [evolutionFlow, setEvolutionFlow] = useState("test_created")
+  const [welcomeStep, setWelcomeStep] = useState("audio_1")
+  const [installApp, setInstallApp] = useState("XCloud")
+  const [installDevice, setInstallDevice] = useState("LG")
 
-function PainelInner() {
-  const params = useSearchParams()
-  const clientId = params.get('client_id')
-  const testId   = params.get('test_id')
-  const source   = params.get('source')
-  const flowParam = params.get('flow') as FlowKey | null
+  // Add log
+  const addLog = useCallback((level: LogEntry["level"], code: string, detail?: string) => {
+    setLogs(prev => [{
+      id: `log-${Date.now()}-${Math.random()}`,
+      timestamp: new Date(),
+      level,
+      code,
+      detail,
+    }, ...prev].slice(0, 100))
+  }, [])
 
-  const [ctx, setCtx] = useState<JarvisCtx>(() => {
-    if (source === 'painel1' && flowParam) {
-      const flowLabels: Record<string, string> = {
-        test_created:          'TEST_CREATED',
-        test_expired:          'TEST_EXPIRED',
-        renewal_created:       'RENEWAL_CREATED',
-        app_swap:              'APP_SWAP',
-        second_screen:         'SECOND_SCREEN',
-        problem_created:       'PROBLEM_CREATED',
-        xcloud_remove_device:  'XCLOUD_REMOVE',
-        xcloud_recreate_device:'XCLOUD_RECREATE',
-        charge_customer:       'CHARGE_CUSTOMER',
+  // Process queue item
+  const processQueueItem = useCallback(async (item: QueueItem) => {
+    const flow = FLOWS[item.simId]
+    if (!flow) return
+
+    setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: "processing" } : q))
+    setIsProcessing(true)
+    setLastEvent({ text: item.label, time: new Date() })
+        setContext({
+          name: searchParams.get("client_name") || searchParams.get("name") || "Cliente em contexto",
+          device: searchParams.get("device_key") || (item.simId === "tv-lg" ? "LG" : item.simId === "audio-falhou" ? "Samsung" : item.simId.includes("xcloud") ? "XCloud" : "Visual"),
+          flow: flow.module,
+          preview: flow.preview,
+          source: searchParams.get("source") || undefined,
+          testId: searchParams.get("test_id") || undefined,
+          clientId: searchParams.get("client_id") || undefined,
+        })
+
+    // Process states
+    let logIndex = 0
+    let hasFailed = false
+    
+    for (const step of flow.states) {
+      setJarvisState(step.state)
+      setStatusText(step.text)
+      
+      if (step.state === "executing" || step.state === "retry") {
+        setCurrentAction(step.text)
       }
-      return {
-        ...INITIAL,
-        state: 'recebendo',
-        label: 'RECEBENDO',
-        sub: 'Contexto recebido do Painel 1',
-        acao: `Aguardando execucao: ${flowParam}`,
-        ultimoEvento: `Flow: ${flowParam}`,
-        flow: flowParam,
-        logs: [
-          mkLog('CONTEXT_RECEIVED', 'success'),
-          mkLog(`SOURCE=painel1  FLOW=${flowParam}`, 'info'),
-          testId ? mkLog(`TEST_ID=${testId}`, 'info') : mkLog('AWAITING_FLOW_SELECTION', 'info'),
-        ],
+
+      if (step.state === "failed") {
+        hasFailed = true
+        setFailures(prev => [{
+          id: `fail-${Date.now()}`,
+          timestamp: new Date(),
+          code: flow.logs[logIndex]?.code || "UNKNOWN",
+          message: step.text,
+          resolved: false,
+        }, ...prev].slice(0, 50))
       }
+
+      if (flow.logs[logIndex]) {
+        addLog(flow.logs[logIndex].level, flow.logs[logIndex].code, flow.logs[logIndex].detail)
+        logIndex++
+      }
+
+      await new Promise(r => setTimeout(r, step.duration))
     }
-    if (source === 'painel1') {
-      return {
-        ...INITIAL,
-        state: 'recebendo',
-        label: 'RECEBENDO',
-        sub: 'Recebendo contexto do Painel 1',
-        acao: 'Aguardando selecao de flow',
-        ultimoEvento: `Contexto recebido${testId ? ` · Teste #${testId}` : ''}`,
-        logs: [
-          mkLog('CONTEXT_RECEIVED', 'success'),
-          mkLog(`SOURCE=painel1${testId ? `  TEST_ID=${testId}` : ''}`, 'info'),
-          mkLog('AWAITING_FLOW_SELECTION', 'info'),
-        ],
-      }
+
+    // Complete item
+    setQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: hasFailed ? "failed" : "completed" } : q))
+    setHistory(prev => [{
+      id: `hist-${Date.now()}`,
+      label: item.label,
+      module: flow.module,
+      time: new Date(),
+      success: !hasFailed,
+    }, ...prev].slice(0, 50))
+    setProcessedCount(prev => prev + 1)
+
+    // Wait before next
+    await new Promise(r => setTimeout(r, 1500))
+    
+    // Remove from queue
+    setQueue(prev => prev.filter(q => q.id !== item.id))
+    
+    // Reset if no more items
+    setJarvisState("idle")
+    setStatusText("Aguardando evento")
+    setCurrentAction(null)
+    setIsProcessing(false)
+  }, [addLog, searchParams])
+
+  // Process queue automatically
+  useEffect(() => {
+    const nextItem = queue.find(q => q.status === "queued")
+    if (nextItem && !isProcessing) {
+      processQueueItem(nextItem)
     }
-    return INITIAL
-  })
+  }, [queue, isProcessing, processQueueItem])
 
-  const [activeTab, setActiveTab] = useState<NavTab>('central')
+  // Add to queue
+  const handleSimulate = useCallback((simId: string, label: string) => {
+    const newItem: QueueItem = {
+      id: `queue-${Date.now()}-${Math.random()}`,
+      simId,
+      label,
+      addedAt: new Date(),
+      status: "queued",
+    }
+    setQueue(prev => [...prev, newItem])
+    addLog("info", "QUEUE_ADD", `${label} adicionado a fila`)
+  }, [addLog])
 
-  const dispatch = useCallback((next: Partial<JarvisCtx> & { newLogs?: LogEntry[] }) => {
-    setCtx(prev => {
-      const { newLogs, ...rest } = next
-      const merged = { ...prev, ...rest }
-      return newLogs?.length ? pushLogs(merged, ...newLogs) : merged
+  const callEvolutionEndpoint = useCallback(async (path: string, payload?: Record<string, unknown>) => {
+    setEvolutionLoading(true)
+    try {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      })
+      const data = await res.json().catch(() => ({ ok: false, code: "INVALID_RESPONSE", message: "Resposta invalida" }))
+      setEvolutionResult(data)
+      addLog(res.ok ? "success" : "warning", data.code || "EVOLUTION_RESULT", data.message || "Endpoint Evolution respondeu")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setEvolutionResult({ ok: false, code: "REQUEST_FAILED", message })
+      addLog("error", "REQUEST_FAILED", message)
+    } finally {
+      setEvolutionLoading(false)
+    }
+  }, [addLog])
+
+  const handleTestEvolution = useCallback(() => {
+    callEvolutionEndpoint("/api/evolution/test-connection")
+  }, [callEvolutionEndpoint])
+
+  const handleDryRunSend = useCallback(() => {
+    const sim = simulations.find((item) => item.id === evolutionFlow)
+    if (sim) handleSimulate(sim.id, sim.label)
+    callEvolutionEndpoint("/api/flows/dispatch", {
+      flow: evolutionFlow,
+      phone: evolutionPhone,
+      context: {
+        cliente: "Cliente Teste",
+        app: evolutionFlow.includes("xcloud") ? "XCloud TV" : "Central Play Plus",
+        usuario: "usuario.demo",
+        senha: "senha.demo",
+        codigo: "00112",
+        painel: "Painel 2",
+        device: "LG",
+        link: "https://painel.centralplayplus.com.br",
+      },
     })
-  }, [])
+  }, [callEvolutionEndpoint, evolutionFlow, evolutionPhone, handleSimulate])
 
-  const handleEvent = useCallback((eventKey: string) => {
-    switch (eventKey) {
+  const handleWelcome = useCallback((dryRun: boolean) => {
+    callEvolutionEndpoint("/api/flows/welcome", {
+      phone: evolutionPhone,
+      client: { name: "Arthur" },
+      dryRun,
+    })
+  }, [callEvolutionEndpoint, evolutionPhone])
 
-      /* ── INSTALAÇÃO ─────────────────────────────── */
-      case 'tvlg':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Guia de instalacao LG pronto',
-          acao: 'Preparar mensagem de instalacao LG',
-          ultimoEvento: 'Cliente respondeu: TV LG',
-          flow: 'installation', dispositivo: 'TV LG',
-          retryVisible: false, steps: null, processados: ctx.processados + 1,
-          acoes: [
-            { label: 'Preparar mensagem', variant: 'primary' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-            { label: 'Enviar simulado', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('DEVICE_DETECTED=TV_LG', 'success'),
-            mkLog('INSTALLATION_FLOW_SELECTED', 'info'),
-            mkLog('MESSAGE_READY', 'info'),
-          ],
-        })
-        break
+  const handleWelcomeRetry = useCallback((dryRun: boolean) => {
+    callEvolutionEndpoint("/api/flows/welcome/retry-step", {
+      phone: evolutionPhone,
+      step: welcomeStep,
+      client: { name: "Arthur" },
+      dryRun,
+    })
+  }, [callEvolutionEndpoint, evolutionPhone, welcomeStep])
 
-      /* ── ÁUDIO FALHOU ────────────────────────────── */
-      case 'audio':
-        dispatch({
-          state: 'falha', label: 'FALHA', sub: 'Audio 4 falhou',
-          acao: 'Reenviar audio 4',
-          ultimoEvento: 'Audio falhou',
-          flow: 'boas_vindas',
-          retryVisible: true, steps: null, fila: ctx.fila + 1,
-          acoes: [
-            { label: 'Retry audio 4', variant: 'danger' },
-            { label: 'Pular etapa', variant: 'warn' },
-          ],
-          newLogs: [
-            mkLog('WELCOME_AUDIO_4_FAILED', 'error'),
-            mkLog('RETRY_READY', 'warn'),
-          ],
-        })
-        break
+  const handleInstall = useCallback((dryRun: boolean) => {
+    callEvolutionEndpoint("/api/flows/install", {
+      phone: evolutionPhone,
+      client: { name: "Arthur" },
+      app: installApp,
+      device: installDevice,
+      dryRun,
+    })
+  }, [callEvolutionEndpoint, evolutionPhone, installApp, installDevice])
 
-      /* ── JA PAGUEI ───────────────────────────────── */
-      case 'paguei':
-        dispatch({
-          state: 'interpretando', label: 'INTERPRETANDO', sub: 'Confirmando pagamento',
-          acao: 'Verificar confirmacao de pagamento',
-          ultimoEvento: 'Ja paguei',
-          flow: 'charge_customer',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Verificar no sistema', variant: 'primary' },
-            { label: 'Solicitar comprovante', variant: 'warn' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('PAYMENT_CLAIM_RECEIVED', 'info'),
-            mkLog('AWAITING_CONFIRMATION', 'warn'),
-          ],
-        })
-        break
+  useEffect(() => {
+    if (hydratedFromQuery.current) return
+    hydratedFromQuery.current = true
 
-      /* ── ATIVAR ──────────────────────────────────── */
-      case 'ativar':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando ativacao',
-          acao: 'Verificar elegibilidade para ativacao',
-          ultimoEvento: 'Quero ativar',
-          flow: 'renewal_created',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Preparar mensagem', variant: 'primary' },
-            { label: 'Escolher template', variant: 'muted' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('INTENT_DETECTED=ATIVAR', 'info'),
-            mkLog('ELIGIBILITY_CHECK', 'warn'),
-          ],
-        })
-        break
+    const source = searchParams.get("source")
+    const clientId = searchParams.get("client_id")
+    const testId = searchParams.get("test_id")
+    const deviceKey = searchParams.get("device_key")
+    const requestedFlow = searchParams.get("flow") || searchParams.get("event")
+    const fallbackFlow = testId ? "test_created" : undefined
+    const flowId = requestedFlow && FLOWS[requestedFlow] ? requestedFlow : fallbackFlow
 
-      /* ── RECRIAR XCLOUD ──────────────────────────── */
-      case 'xcloud':
-        dispatch({
-          state: 'executando', label: 'EXECUTANDO', sub: 'Orquestrando recriacao XCloud',
-          acao: 'Recriar device XCloud',
-          ultimoEvento: 'Recriar XCloud',
-          flow: 'xcloud_recreate_device',
-          retryVisible: false,
-          fila: ctx.fila + 1,
-          steps: ['Localizar device', 'Desativar', 'Excluir', 'Recriar', 'Vincular Xtream', 'Confirmar RELOAD'],
-          acoes: [
-            { label: 'Confirmar recriacao', variant: 'primary' },
-            { label: 'Aguardar RELOAD', variant: 'warn' },
-          ],
-          newLogs: [
-            mkLog('XCLOUD_RECREATE_INIT', 'warn'),
-            mkLog('DEVICE_LOCATE_START', 'info'),
-          ],
-        })
-        break
+    if (!source && !clientId && !testId && !deviceKey && !flowId) return
 
-      /* ── REMOVER XCLOUD ──────────────────────────── */
-      case 'xcloud_remove':
-        dispatch({
-          state: 'executando', label: 'EXECUTANDO', sub: 'Removendo device XCloud',
-          acao: 'Remover device XCloud',
-          ultimoEvento: 'Remover XCloud',
-          flow: 'xcloud_remove_device',
-          retryVisible: false,
-          fila: ctx.fila + 1,
-          steps: ['Localizar device', 'Desativar', 'Excluir device'],
-          acoes: [
-            { label: 'Confirmar remocao', variant: 'danger' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('XCLOUD_REMOVE_INIT', 'warn'),
-            mkLog('DEVICE_LOCATE_START', 'info'),
-          ],
-        })
-        break
+    addLog("success", "QUERY_CONTEXT_RECEIVED", [
+      source ? `source=${source}` : null,
+      clientId ? `client_id=${clientId}` : null,
+      testId ? `test_id=${testId}` : null,
+      deviceKey ? "device_key=presente" : null,
+    ].filter(Boolean).join(" "))
 
-      /* ── FALHA XCLOUD ────────────────────────────── */
-      case 'falha_xcloud':
-        dispatch({
-          state: 'falha', label: 'FALHA', sub: 'Falha detectada no XCloud',
-          acao: 'Verificar logs XCloud',
-          ultimoEvento: 'Falha XCloud',
-          flow: 'problem_created',
-          retryVisible: true, steps: null, fila: ctx.fila + 1,
-          acoes: [
-            { label: 'Retry operacao', variant: 'danger' },
-            { label: 'Preparar prompt Codex', variant: 'warn' },
-          ],
-          newLogs: [
-            mkLog('XCLOUD_ERROR_DETECTED', 'error'),
-            mkLog('RETRY_AVAILABLE', 'warn'),
-          ],
-        })
-        break
+    setContext({
+      name: searchParams.get("client_name") || searchParams.get("name") || "Cliente em contexto",
+      device: deviceKey || "Visual",
+      flow: flowId ? FLOWS[flowId].module : "Contexto",
+      preview: flowId ? FLOWS[flowId].preview : "Contexto recebido do Painel 1 para leitura visual.",
+      source: source || undefined,
+      testId: testId || undefined,
+      clientId: clientId || undefined,
+    })
+    setLastEvent({ text: flowId ? `Query: ${flowId}` : "Contexto recebido", time: new Date() })
 
-      /* ── TESTE CRIADO ────────────────────────────── */
-      case 'test_created':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Teste pronto para envio',
-          acao: 'Preparar mensagem do teste',
-          ultimoEvento: 'Teste criado',
-          flow: 'test_created',
-          retryVisible: false, steps: null, processados: ctx.processados + 1,
-          acoes: [
-            { label: 'Preparar mensagem', variant: 'primary' },
-            { label: 'Preparar arte do teste', variant: 'muted' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('TEST_CREATED_RECEIVED', 'success'),
-            mkLog('CLIENT_CONTEXT_LOADED', 'info'),
-            mkLog('TEST_MESSAGE_READY', 'info'),
-            mkLog('WAITING_OPERATOR', 'warn'),
-          ],
-        })
-        break
-
-      /* ── TESTE EXPIRADO ──────────────────────────── */
-      case 'test_expired':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Teste encerrado — preparando acoes',
-          acao: 'Preparar figurinha de teste expirado',
-          ultimoEvento: 'Teste expirado',
-          flow: 'test_expired',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Enviar figurinha', variant: 'primary' },
-            { label: 'Abrir painel provedor', variant: 'muted' },
-            { label: 'Copiar usuario cliente', variant: 'muted' },
-            { label: 'Remover device XCloud', variant: 'warn' },
-          ],
-          newLogs: [
-            mkLog('TEST_EXPIRED_RECEIVED', 'warn'),
-            mkLog('STICKER_FLOW_READY', 'info'),
-            mkLog('AWAITING_OPERATOR', 'warn'),
-          ],
-        })
-        break
-
-      /* ── RENOVAÇÃO ───────────────────────────────── */
-      case 'renewal':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Mensagem de renovacao pronta',
-          acao: 'Preparar template de renovacao',
-          ultimoEvento: 'Renovacao criada',
-          flow: 'renewal_created',
-          retryVisible: false, steps: null, processados: ctx.processados + 1,
-          acoes: [
-            { label: 'Preparar mensagem', variant: 'primary' },
-            { label: 'Escolher template', variant: 'muted' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-            { label: 'Enviar simulado', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('RENEWAL_CREATED_RECEIVED', 'success'),
-            mkLog('TEMPLATE_SELECTED', 'info'),
-            mkLog('MESSAGE_READY', 'info'),
-          ],
-        })
-        break
-
-      /* ── TROCA DE APP ────────────────────────────── */
-      case 'app_swap':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando troca de aplicativo',
-          acao: 'Preparar instrucoes de migracao',
-          ultimoEvento: 'Troca de app',
-          flow: 'app_swap',
-          appAtual: 'App Atual', appNovo: 'App Novo', painel: 'Painel Demo',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Preparar mensagem', variant: 'primary' },
-            { label: 'Preparar instalacao', variant: 'muted' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('APP_SWAP_RECEIVED', 'info'),
-            mkLog('MIGRATION_FLOW_READY', 'info'),
-            mkLog('AWAITING_OPERATOR', 'warn'),
-          ],
-        })
-        break
-
-      /* ── SEGUNDA TELA ────────────────────────────── */
-      case 'second_screen':
-        dispatch({
-          state: 'preparando', label: 'PREPARANDO', sub: 'Preparando segunda tela',
-          acao: 'Preparar instrucao de segunda tela',
-          ultimoEvento: 'Segunda tela',
-          flow: 'second_screen',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Preparar instrucao', variant: 'primary' },
-            { label: 'Verificar tela disponivel', variant: 'muted' },
-            { label: 'Aguardar confirmacao', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('SECOND_SCREEN_RECEIVED', 'info'),
-            mkLog('SCREEN_SLOT_CHECK', 'warn'),
-            mkLog('AWAITING_OPERATOR', 'warn'),
-          ],
-        })
-        break
-
-      /* ── PROBLEMA ────────────────────────────────── */
-      case 'problem':
-        dispatch({
-          state: 'interpretando', label: 'INTERPRETANDO', sub: 'Problema identificado',
-          acao: 'Preparar resposta ao problema',
-          ultimoEvento: 'Problema reportado',
-          flow: 'problem_created',
-          retryVisible: false, steps: null,
-          acoes: [
-            { label: 'Preparar resposta', variant: 'primary' },
-            { label: 'Preparar troca de app', variant: 'warn' },
-            { label: 'Preparar prompt Codex', variant: 'muted' },
-            { label: 'Salvar conhecimento', variant: 'muted' },
-          ],
-          newLogs: [
-            mkLog('PROBLEM_CREATED_RECEIVED', 'warn'),
-            mkLog('FLOW_ANALYSIS_START', 'info'),
-            mkLog('AWAITING_OPERATOR', 'warn'),
-          ],
-        })
-        break
-
-      /* ── RETRY ───────────────────────────────────── */
-      case 'retry':
-        dispatch({
-          state: 'reenvio', label: 'REENVIO', sub: 'Reenvio em andamento...',
-          acao: 'Executando retry...',
-          ultimoEvento: 'Retry acionado',
-          retryVisible: false,
-          processados: ctx.processados + 1,
-          fila: Math.max(0, ctx.fila - 1),
-          newLogs: [
-            mkLog('RETRY_TRIGGERED', 'warn'),
-            mkLog('FLOW_RESTARTED', 'info'),
-          ],
-        })
-        setTimeout(() => setCtx(prev => ({
-          ...prev,
-          state: 'concluido', label: 'CONCLUIDO', sub: 'Fluxo concluido',
-          acao: 'Aguardando proximo evento',
-          logs: [...prev.logs, mkLog('FLOW_COMPLETED', 'success')].slice(-5),
-        })), 2200)
-        break
+    if (flowId) {
+      const label = simulations.find(sim => sim.id === flowId)?.label || flowId
+      handleSimulate(flowId, label)
     }
-  }, [ctx, dispatch])
+  }, [addLog, handleSimulate, searchParams])
 
-  const handleReset = useCallback(() => {
-    _lid = 1
-    setCtx({ ...INITIAL, logs: [mkLog('sistema reiniciado', 'info')] })
-  }, [])
+  const config = stateConfig[jarvisState]
+  const isActive = jarvisState !== "idle"
+
+  // Format time
+  const formatTime = (date: Date) => date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  const formatTimeAgo = (date: Date) => {
+    const diff = Math.floor((Date.now() - date.getTime()) / 1000)
+    if (diff < 60) return `${diff}s`
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`
+    return `${Math.floor(diff / 3600)}h`
+  }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      <Sidebar active={activeTab} onNav={setActiveTab} source={source} clientId={clientId} testId={testId} flow={flowParam} />
+    <div className="min-h-screen bg-background text-foreground flex overflow-hidden">
+      {/* ULTRA PREMIUM background with multiple layers */}
+      <div className="fixed inset-0 pointer-events-none">
+        {/* Base metallic gradient */}
+        <div className="absolute inset-0 bg-metallic-dark" />
+        {/* Circuit board tech texture */}
+        <div className="absolute inset-0 bg-circuit bg-circuit-animated" />
+        {/* Hex grid pattern overlay */}
+        <div className="absolute inset-0 bg-hex-grid opacity-50" />
+        {/* Brushed metal texture */}
+        <div className="absolute inset-0 brushed-metal opacity-60" />
+        {/* Ambient glow from center - more intense */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_45%,_oklch(0.68_0.25_255_/_10%)_0%,_transparent_55%)]" />
+        {/* Secondary glow points */}
+        <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-[radial-gradient(circle,_oklch(0.60_0.20_285_/_5%)_0%,_transparent_50%)]" />
+        <div className="absolute bottom-1/4 right-1/4 w-[500px] h-[500px] bg-[radial-gradient(circle,_oklch(0.70_0.18_200_/_4%)_0%,_transparent_50%)]" />
+        {/* Top light reflection */}
+        <div className="absolute inset-x-0 top-0 h-[500px] bg-gradient-to-b from-primary/[0.06] via-primary/[0.02] to-transparent" />
+        {/* Vignette effect - deeper */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_70%_at_50%_50%,_transparent_20%,_oklch(0_0_0_/_60%)_100%)]" />
+        {/* Shimmer overlay */}
+        <div className="absolute inset-0 shimmer opacity-40" />
+        
+        {/* FLOATING PARTICLES */}
+        <div className="floating-particle floating-particle-slow" style={{ top: '15%', left: '10%', animationDelay: '0s' }} />
+        <div className="floating-particle floating-particle-cyan" style={{ top: '25%', left: '85%', animationDelay: '2s' }} />
+        <div className="floating-particle floating-particle-purple floating-particle-fast" style={{ top: '60%', left: '15%', animationDelay: '4s' }} />
+        <div className="floating-particle" style={{ top: '70%', left: '80%', animationDelay: '1s' }} />
+        <div className="floating-particle floating-particle-slow floating-particle-cyan" style={{ top: '40%', left: '5%', animationDelay: '3s' }} />
+        <div className="floating-particle floating-particle-purple" style={{ top: '80%', left: '50%', animationDelay: '5s' }} />
+        <div className="floating-particle floating-particle-fast" style={{ top: '10%', left: '60%', animationDelay: '2.5s' }} />
+        <div className="floating-particle floating-particle-cyan floating-particle-slow" style={{ top: '50%', left: '92%', animationDelay: '1.5s' }} />
+        <div className="floating-particle floating-particle-purple" style={{ top: '90%', left: '20%', animationDelay: '4.5s' }} />
+        <div className="floating-particle" style={{ top: '35%', left: '70%', animationDelay: '0.5s' }} />
+      </div>
 
-      <div className="relative flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header
-          className="relative z-10 flex h-11 shrink-0 items-center justify-between px-5"
-          style={{
-            background: 'linear-gradient(180deg, rgba(13,18,32,0.98) 0%, rgba(9,14,28,0.95) 100%)',
-            borderBottom: '1px solid rgba(30,45,71,0.7)',
-            boxShadow: '0 1px 0 rgba(59,130,246,0.06)',
-          }}
-        >
-          <div className="flex items-center gap-2.5">
-            <span
-              className="flex items-center gap-1.5 rounded-full px-2.5 py-[3px] font-mono text-[10px] uppercase tracking-widest"
-              style={{
-                background: 'rgba(34,197,94,0.08)',
-                border: '1px solid rgba(34,197,94,0.3)',
-                color: '#22c55e',
-                boxShadow: '0 0 12px rgba(34,197,94,0.12)',
-              }}
-            >
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
-              ATIVO
-            </span>
-            <span className="font-mono text-[13px] font-semibold text-foreground/90">Central Play</span>
-            <span
-              className="rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-wide"
-              style={{
-                background: 'linear-gradient(90deg, rgba(59,130,246,0.2) 0%, rgba(34,211,238,0.15) 100%)',
-                border: '1px solid rgba(59,130,246,0.3)',
-                color: '#60a5fa',
-              }}
-            >
-              Plus
-            </span>
+      {/* Sidebar */}
+      <aside className="w-[200px] border-r border-primary/10 bg-gradient-to-b from-card/50 via-card/20 to-transparent backdrop-blur-md flex flex-col relative z-10">
+        <nav className="flex-1 p-3 space-y-1 pt-6">
+          {sidebarItems.map((item) => {
+            const Icon = item.icon
+            const isActiveTab = item.id === activeTab
+            const count = item.id === "falhas" ? failures.filter(f => !f.resolved).length : 0
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all relative",
+                  isActiveTab 
+                    ? "bg-primary/15 text-primary border border-primary/20" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+                )}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+                {count > 0 && (
+                  <span className="ml-auto px-1.5 py-0.5 text-[10px] bg-destructive text-white rounded-full font-bold">
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
+
+        {/* System status */}
+        <div className="p-4 border-t border-border/20 bg-card/30">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-2 h-2 rounded-full bg-chart-2 pulse-dot glow-green" />
+            <span className="text-xs font-medium text-foreground">Sistema estavel</span>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.2em] sm:inline" style={{ color: 'rgba(107,127,168,0.6)' }}>
-              Tempo real
-            </span>
-            <a
-              href="https://painel.centralplayplus.com.br"
-              title="Voltar para Gestao"
-              className="flex h-7 w-7 items-center justify-center rounded-full font-mono text-[10px] font-bold transition-all"
-              style={{
-                background: 'linear-gradient(135deg, rgba(59,130,246,0.25) 0%, rgba(34,211,238,0.15) 100%)',
-                border: '1px solid rgba(59,130,246,0.35)',
-                color: '#60a5fa',
-                boxShadow: '0 0 12px rgba(59,130,246,0.2)',
-              }}
-            >
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground/60 mb-3">
+            <span>Processados: {processedCount}</span>
+            <span>Fila: {queue.length}</span>
+          </div>
+          <div className="h-8 flex items-end gap-0.5">
+            {[40, 65, 45, 80, 55, 70, 50, 65, 85, 60, 75, 90].map((h, i) => (
+              <div key={i} className="flex-1 bg-gradient-to-t from-primary/30 to-primary/10 rounded-t transition-all duration-300" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col relative z-10">
+        {/* Header */}
+        <header className="h-14 border-b border-border/30 bg-card/20 backdrop-blur-md flex items-center px-6 gap-4">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">
+            <Layers className="w-4 h-4 text-primary" />
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-chart-2/10 border border-chart-2/20">
+            <div className="w-1.5 h-1.5 rounded-full bg-chart-2 pulse-dot" />
+            <span className="text-[11px] font-semibold text-chart-2">ATIVO</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">Central Play</span>
+            <span className="text-[10px] font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md border border-primary/20">Plus</span>
+          </div>
+
+          <div className="ml-auto flex items-center gap-4">
+            {queue.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-chart-3/10 border border-chart-3/20">
+                <ListOrdered className="w-3.5 h-3.5 text-chart-3" />
+                <span className="text-xs font-medium text-chart-3">{queue.length} na fila</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
+              <Zap className="w-3.5 h-3.5" />
+              <span>Tempo real</span>
+            </div>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-secondary to-card flex items-center justify-center text-xs font-semibold text-foreground border border-border/30 relative">
               JS
-            </a>
+              <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-chart-2 border-2 border-background" />
+            </div>
           </div>
         </header>
 
-        {/* Conteudo principal */}
-        {activeTab === 'configuracoes' ? (
-          <div className="flex-1 overflow-y-auto">
-            <ConfigPanel />
-          </div>
-        ) : (
-          <main className="relative flex flex-1 items-center justify-center overflow-hidden">
-            {/* Radial ambient glow */}
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={{ background: 'radial-gradient(ellipse 55% 55% at 50% 50%, rgba(59,130,246,0.06) 0%, transparent 70%)' }}
-            />
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={{ background: 'radial-gradient(ellipse 30% 30% at 50% 50%, rgba(34,211,238,0.04) 0%, transparent 60%)' }}
-            />
+        {/* Main area */}
+        <main className="flex-1 overflow-auto">
+          {activeTab === "central" && (
+            <div className="h-full flex flex-col">
+              {/* JARVIS Section */}
+              <div className="flex-1 flex items-center justify-center py-8 relative">
+                {/* Ambient glow */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-primary/[0.02] rounded-full blur-[120px]" />
+                
+                {/* Side cards - Last Event */}
+                <div className="absolute left-8 top-1/2 -translate-y-1/2 w-[200px]">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-muted-foreground/60">
+                      <Zap className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-semibold tracking-wider">ULTIMO EVENTO</span>
+                    </div>
+                    <div className={cn(
+                      "p-4 rounded-xl backdrop-blur-md transition-all duration-500 card-glass",
+                      lastEvent ? "card-glow" : "bg-card/30 border-border/20"
+                    )}>
+                      {lastEvent ? (
+                        <>
+                          <p className="text-sm font-medium text-foreground mb-3">{lastEvent.text}</p>
+                          <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/50">
+                            <Clock className="w-3 h-3" />
+                            Ha {formatTimeAgo(lastEvent.time)}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground/30">Aguardando...</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
 
-            <Particles />
+                {/* JARVIS Core - ULTRA PREMIUM */}
+                <div className="relative flex flex-col items-center">
+                  <div className="relative w-[460px] h-[460px] flex items-center justify-center">
+                    {/* Ambient glow behind rings */}
+                    <div className="absolute w-[550px] h-[550px] rounded-full bg-[radial-gradient(circle,_oklch(0.68_0.25_255_/_12%)_0%,_transparent_60%)]" />
+                    
+                    {/* Outer decorative ring - faint */}
+                    <div className="absolute w-[440px] h-[440px] rounded-full border border-primary/5 orbit-ring-slow" />
+                    
+                    {/* Outer rings with intense neon */}
+                    <div className={cn(
+                      "absolute w-[400px] h-[400px] rounded-full border-[1.5px] orbit-ring-slow ring-pulse",
+                      isActive ? "border-primary/40 neon-ring" : "border-primary/20"
+                    )} />
+                    
+                    <div className={cn(
+                      "absolute w-[350px] h-[350px] rounded-full border-2 orbit-ring-reverse ring-pulse-delayed",
+                      isActive ? "border-primary/60 neon-ring-intense" : "border-primary/30 neon-ring"
+                    )} />
+                    
+                    <div className={cn(
+                      "absolute w-[300px] h-[300px] rounded-full border-[2.5px] orbit-ring ring-pulse-delayed-2",
+                      isActive ? "border-primary/80 neon-ring-intense" : "border-primary/40 neon-ring"
+                    )} />
+                    
+                    {/* Inner bright ring */}
+                    <div className={cn(
+                      "absolute w-[260px] h-[260px] rounded-full border-2 orbit-ring-reverse",
+                      isActive ? "border-primary neon-ring-intense" : "border-primary/50 neon-ring"
+                    )} />
+                    
+                    {/* Energy particles on multiple rings */}
+                    <div className="absolute w-[400px] h-[400px] orbit-ring-slow">
+                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-primary energy-particle" style={{ boxShadow: '0 0 15px oklch(0.68 0.22 255), 0 0 30px oklch(0.68 0.22 255 / 50%)' }} />
+                      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-chart-5 energy-particle" style={{ animationDelay: '1.5s' }} />
+                    </div>
+                    <div className="absolute w-[350px] h-[350px] orbit-ring-reverse">
+                      <div className="absolute top-1/2 left-0 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-cyan-400 energy-particle" style={{ animationDelay: '0.5s', boxShadow: '0 0 12px oklch(0.75 0.15 200)' }} />
+                      <div className="absolute top-1/2 right-0 -translate-y-1/2 w-2 h-2 rounded-full bg-primary/80 energy-particle" style={{ animationDelay: '2s' }} />
+                    </div>
+                    <div className="absolute w-[300px] h-[300px] orbit-ring">
+                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-purple-400 energy-particle" style={{ animationDelay: '0.8s', boxShadow: '0 0 10px oklch(0.60 0.20 285)' }} />
+                    </div>
+                    
+                    {/* Inner gradient glow ring */}
+                    <div className={cn(
+                      "absolute w-[230px] h-[230px] rounded-full transition-all duration-500",
+                      isActive 
+                        ? "bg-gradient-to-br from-primary/35 via-primary/15 to-primary/30 orbit-ring-fast" 
+                        : "bg-gradient-to-br from-primary/20 via-primary/8 to-primary/18 orbit-ring-slow"
+                    )} style={{ boxShadow: isActive ? 'inset 0 0 60px oklch(0.68 0.22 255 / 30%)' : 'inset 0 0 40px oklch(0.68 0.22 255 / 15%)' }} />
 
-            {/* Painel flutuante esquerdo — Ultimo Evento */}
-            <div className="animate-float absolute left-5 top-1/2 z-10 w-44">
-              <p className="mb-2 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
-                <IconBolt />
-                Ultimo Evento
-              </p>
-              <div
-                className="rounded-xl px-3.5 py-3"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
-                  border: '1px solid rgba(30,45,71,0.8)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
-                  backdropFilter: 'blur(12px)',
-                }}
-              >
-                <p key={ctx.ultimoEvento} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
-                  {ctx.ultimoEvento}
-                </p>
+                    {/* Core orb - PREMIUM */}
+                    <div className={cn(
+                      "relative w-[190px] h-[190px] rounded-full flex flex-col items-center justify-center",
+                      "bg-gradient-to-br from-[#050a14] via-[#081220] to-[#050a14]",
+                      "border-2 transition-all duration-300",
+                      isActive ? "border-primary/80" : "border-primary/50",
+                      isActive ? "jarvis-processing" : "jarvis-breathe"
+                    )}>
+                      {/* Inner highlight */}
+                      <div className="absolute inset-0 rounded-full core-inner-glow" />
+                      {/* Specular highlight */}
+                      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-white/5 via-transparent to-transparent" />
+                      
+                      {isActive && (
+                        <div className="absolute inset-0 rounded-full overflow-hidden">
+                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent scanning" style={{ backgroundSize: "200% 100%" }} />
+                        </div>
+                      )}
+
+                      <div className="relative z-10 text-center px-5">
+                        <div className={cn("text-sm font-bold tracking-[0.25em] mb-2 text-glow", config.color)}>
+                          {config.label}
+                        </div>
+                        <div className="text-[13px] text-foreground/85 max-w-[150px] leading-snug">
+                          {statusText}
+                        </div>
+                        <div className="flex items-center justify-center gap-2 mt-4">
+                          {[0, 1, 2].map((i) => (
+                            <div key={i} className={cn(
+                              "w-2 h-2 rounded-full bg-primary transition-all",
+                              isActive && "energy-particle"
+                            )} style={{ animationDelay: `${i * 200}ms`, boxShadow: '0 0 8px oklch(0.68 0.22 255)' }} />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <div className="text-center mt-5">
+                    <h1 className="text-2xl font-bold tracking-[0.35em] text-foreground text-glow">JARVIS</h1>
+                    <p className="text-[11px] text-muted-foreground/50 tracking-[0.2em] mt-1.5">CENTRAL PLAY</p>
+                  </div>
+
+                  {/* Context pill - glass effect */}
+                  {context && (
+                    <div className="mt-5 w-full max-w-[560px] rounded-2xl card-glass px-6 py-4">
+                      <div className="flex flex-wrap items-center justify-center gap-3">
+                        <User className="w-4 h-4 text-primary/70" />
+                        <span className="text-sm font-medium text-foreground">{context.name}</span>
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                        <span className="text-sm text-muted-foreground/80">{context.device}</span>
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                        <span className="text-sm font-medium text-primary">{context.flow}</span>
+                      </div>
+                      <div className="mt-3 rounded-xl border border-primary/15 bg-background/35 px-4 py-3 text-center">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/70">WhatsApp preview</p>
+                        <p className="mt-1 text-xs leading-relaxed text-foreground/75">{context.preview}</p>
+                        {(context.source || context.testId || context.clientId) && (
+                          <p className="mt-2 font-mono text-[10px] text-muted-foreground/60">
+                            {[context.source && `source=${context.source}`, context.testId && `test_id=${context.testId}`, context.clientId && `client_id=${context.clientId}`].filter(Boolean).join("  ")}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Side cards - Action & Queue - GLASS EFFECT */}
+                <div className="absolute right-8 top-1/2 -translate-y-1/2 w-[200px] space-y-4">
+                  {/* Current Action */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-muted-foreground/60">
+                      <Play className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-semibold tracking-wider">ACAO ATUAL</span>
+                    </div>
+                    <div className={cn(
+                      "p-4 rounded-xl backdrop-blur-md transition-all duration-500",
+                      currentAction ? "card-glass card-glow" : "bg-card/30 border border-border/20"
+                    )}>
+                      {currentAction ? (
+                        <>
+                          <p className="text-sm font-medium text-foreground mb-3">{currentAction}</p>
+                          <div className="flex items-center gap-1.5 text-[10px] text-chart-2">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Em andamento
+                          </div>
+                        </>
+
+                      ) : (
+                        <p className="text-sm text-muted-foreground/30">Nenhuma acao</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Queue */}
+                  {queue.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-muted-foreground/60">
+                        <ListOrdered className="w-3.5 h-3.5" />
+                        <span className="text-[10px] font-semibold tracking-wider">FILA</span>
+                      </div>
+                      <div className="p-3 rounded-xl border border-chart-3/20 bg-card/40 backdrop-blur-sm space-y-2">
+                        {queue.slice(0, 3).map((item, i) => (
+                          <div key={item.id} className={cn(
+                            "flex items-center gap-2 text-xs p-2 rounded-lg",
+                            item.status === "processing" ? "bg-primary/10 text-primary" : "bg-secondary/30 text-muted-foreground"
+                          )}>
+                            {item.status === "processing" ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <span className="w-3 h-3 flex items-center justify-center text-[10px] text-muted-foreground/50">{i + 1}</span>
+                            )}
+                            <span className="truncate">{item.label}</span>
+                          </div>
+                        ))}
+                        {queue.length > 3 && (
+                          <p className="text-[10px] text-muted-foreground/40 text-center">+{queue.length - 3} mais</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom section */}
+              <div className="border-t border-border/20 bg-card/20 backdrop-blur-sm p-6">
+                <div className="max-w-[1200px] mx-auto grid grid-cols-12 gap-6">
+                  {/* Evolution safe controls */}
+                  <div className="col-span-12">
+                    <div className="rounded-2xl border border-primary/15 bg-card/35 p-4">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <MessageSquare className="h-4 w-4 text-primary/70" />
+                            <span className="text-xs font-semibold tracking-wider text-muted-foreground/70">EVOLUTION / WHATSAPP</span>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider",
+                                evolutionResult?.flags?.enabled && !evolutionResult?.flags?.dryRun
+                                  ? "border-chart-2/30 bg-chart-2/10 text-chart-2"
+                                  : "border-chart-3/30 bg-chart-3/10 text-chart-3"
+                              )}
+                            >
+                              {evolutionResult?.flags?.enabled && !evolutionResult?.flags?.dryRun
+                                ? "Real ativo"
+                                : evolutionResult?.flags?.dryRun === false
+                                  ? "Real desativado"
+                                  : "Dry-run"}
+                            </span>
+                          </div>
+                          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground/70">
+                            Base de envio real preparada com feature flag. Com dry-run ativo, os botoes apenas validam payload,
+                            geram preview e registram logs locais.
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleTestEvolution}
+                            disabled={evolutionLoading}
+                            className="h-9 gap-2 bg-card/50 border-border/30"
+                          >
+                            <Settings className="h-3.5 w-3.5" />
+                            Testar conexao Evolution
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleDryRunSend}
+                            disabled={evolutionLoading}
+                            className="h-9 gap-2 bg-primary/10 border-primary/25 text-primary"
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            Simular envio
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-[180px_220px_1fr]">
+                        <label className="space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Fluxo</span>
+                          <select
+                            value={evolutionFlow}
+                            onChange={(event) => setEvolutionFlow(event.target.value)}
+                            className="h-9 w-full rounded-lg border border-border/30 bg-background/50 px-3 text-xs text-foreground outline-none"
+                          >
+                            {["test_created", "test_expired", "renewal_created", "install_requested", "app_swap", "second_screen", "problem_created"].map((flow) => (
+                              <option key={flow} value={flow}>{flow}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Telefone de teste</span>
+                          <input
+                            value={evolutionPhone}
+                            onChange={(event) => setEvolutionPhone(event.target.value)}
+                            placeholder="Use OPERATOR_WHATSAPP no teste real"
+                            className="h-9 w-full rounded-lg border border-border/30 bg-background/50 px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground/40"
+                          />
+                        </label>
+                        <div className="rounded-xl border border-border/20 bg-[#080c14] p-3 font-mono text-[11px]">
+                          <div className="mb-2 flex items-center gap-2 text-muted-foreground/50">
+                            <Terminal className="h-3.5 w-3.5" />
+                            resultado
+                          </div>
+                          {evolutionResult ? (
+                            <div className="space-y-1 text-foreground/80">
+                              <p>{evolutionResult.code || "RESULT"} · {evolutionResult.message || "-"}</p>
+                              {evolutionResult.preview && <p className="line-clamp-2 text-primary/80">{evolutionResult.preview}</p>}
+                              {evolutionResult.logs?.slice(0, 2).map((entry, index) => (
+                                <p key={`${entry.code}-${index}`} className="text-muted-foreground/60">{entry.code}: {entry.message}</p>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-muted-foreground/35">Aguardando teste...</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                        <div className="rounded-xl border border-border/20 bg-background/25 p-3">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Boas-vindas</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground/50">4 etapas: audio, audio, prova social, audio aparelho</p>
+                            </div>
+                            <select
+                              value={welcomeStep}
+                              onChange={(event) => setWelcomeStep(event.target.value)}
+                              className="h-8 rounded-lg border border-border/30 bg-background/50 px-2 text-[11px] text-foreground outline-none"
+                            >
+                              {["audio_1", "audio_2", "social_image", "audio_4"].map((step) => (
+                                <option key={step} value={step}>{step}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handleWelcome(true)} disabled={evolutionLoading} className="h-8 text-xs bg-card/40 border-border/30">
+                              Preparar
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleWelcome(true)} disabled={evolutionLoading} className="h-8 text-xs bg-primary/10 border-primary/25 text-primary">
+                              Simular boas-vindas
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleWelcome(false)} disabled={evolutionLoading} className="h-8 text-xs bg-chart-2/10 border-chart-2/25 text-chart-2">
+                              Enviar operador
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleWelcomeRetry(true)} disabled={evolutionLoading} className="h-8 text-xs bg-chart-3/10 border-chart-3/25 text-chart-3">
+                              Retry etapa
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleWelcomeRetry(false)} disabled={evolutionLoading} className="h-8 text-xs bg-destructive/10 border-destructive/25 text-destructive">
+                              Retry operador
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-border/20 bg-background/25 p-3">
+                          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                            <label className="space-y-1">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">App</span>
+                              <select value={installApp} onChange={(event) => setInstallApp(event.target.value)} className="h-8 w-full rounded-lg border border-border/30 bg-background/50 px-2 text-[11px] text-foreground outline-none">
+                                {["XCloud", "Blessed Player", "PlaySim", "FunPlay", "Smart STB", "Manual"].map((app) => <option key={app} value={app}>{app}</option>)}
+                              </select>
+                            </label>
+                            <label className="space-y-1">
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Aparelho</span>
+                              <select value={installDevice} onChange={(event) => setInstallDevice(event.target.value)} className="h-8 w-full rounded-lg border border-border/30 bg-background/50 px-2 text-[11px] text-foreground outline-none">
+                                {["Samsung", "LG", "Roku", "Android TV / Google TV / TCL", "TV Box", "Fire Stick / Mi Stick", "Celular Android", "iPhone / iOS", "PC"].map((device) => <option key={device} value={device}>{device}</option>)}
+                              </select>
+                            </label>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handleInstall(true)} disabled={evolutionLoading} className="h-8 text-xs bg-card/40 border-border/30">
+                              Preview instalacao
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleInstall(true)} disabled={evolutionLoading} className="h-8 text-xs bg-primary/10 border-primary/25 text-primary">
+                              Simular envio
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => handleInstall(false)} disabled={evolutionLoading} className="h-8 text-xs bg-chart-2/10 border-chart-2/25 text-chart-2">
+                              Enviar operador
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Simulator */}
+                  <div className="col-span-8">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Zap className="w-4 h-4 text-primary/70" />
+                      <span className="text-xs font-semibold text-muted-foreground/70 tracking-wider">SIMULAR</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {simulations.map((sim) => (
+                        <Button
+                          key={sim.id}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSimulate(sim.id, sim.label)}
+                          className="h-10 px-4 gap-2 bg-card/50 border-border/30 hover:border-primary/30 hover:bg-primary/5 transition-all"
+                        >
+                          <span className="text-primary/70">{sim.icon}</span>
+                          <span className="text-sm">{sim.label}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Mini Console */}
+                  <div className="col-span-4">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Terminal className="w-4 h-4 text-primary/70" />
+                      <span className="text-xs font-semibold text-muted-foreground/70 tracking-wider">CONSOLE</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#080c14] border border-border/20 font-mono text-xs space-y-1 h-[100px] overflow-hidden">
+                      {logs.slice(0, 4).map((log) => (
+                        <div key={log.id} className="flex items-center gap-2 terminal-line">
+                          <span className={cn(
+                            "w-1.5 h-1.5 rounded-full",
+                            log.level === "success" ? "bg-chart-2" :
+                            log.level === "error" ? "bg-destructive" :
+                            log.level === "warning" ? "bg-chart-3" : "bg-primary"
+                          )} />
+                          <span className="text-foreground/80">{log.code}</span>
+                          <span className="ml-auto text-muted-foreground/40">{formatTime(log.timestamp)}</span>
+                        </div>
+                      ))}
+                      {logs.length === 0 && (
+                        <div className="text-muted-foreground/30 flex items-center gap-2">
+                          <span className="terminal-cursor">_</span>
+                          aguardando...
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+          )}
 
-            {/* Painel flutuante direito — Acao Atual */}
-            <div className="animate-float absolute right-5 top-1/2 z-10 w-44 text-right" style={{ animationDelay: '1s' }}>
-              <p className="mb-2 flex items-center justify-end gap-1.5 font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: 'rgba(107,127,168,0.6)' }}>
-                Acao Atual
-                <IconPlay />
-              </p>
-              <div
-                className="rounded-xl px-3.5 py-3"
-                style={{
-                  background: 'linear-gradient(135deg, rgba(13,18,32,0.95) 0%, rgba(9,14,28,0.9) 100%)',
-                  border: '1px solid rgba(30,45,71,0.8)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
-                  backdropFilter: 'blur(12px)',
-                }}
-              >
-                <p key={ctx.acao} className="animate-fade-up font-mono text-[11px] leading-relaxed" style={{ color: 'rgba(226,232,244,0.8)' }}>
-                  {ctx.acao}
-                </p>
+          {/* Falhas Tab */}
+          {activeTab === "falhas" && (
+            <div className="p-8 max-w-[1000px] mx-auto">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Falhas</h2>
+                  <p className="text-sm text-muted-foreground/60 mt-1">Historico de erros e falhas do sistema</p>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-destructive/10 border border-destructive/20">
+                  <AlertTriangle className="w-4 h-4 text-destructive" />
+                  <span className="text-sm font-medium text-destructive">{failures.filter(f => !f.resolved).length} nao resolvidas</span>
+                </div>
+              </div>
+
+              {failures.length === 0 ? (
+                <div className="text-center py-20">
+                  <CheckCircle2 className="w-12 h-12 text-chart-2/30 mx-auto mb-4" />
+                  <p className="text-muted-foreground/50">Nenhuma falha registrada</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {failures.map((failure) => (
+                    <div key={failure.id} className={cn(
+                      "p-4 rounded-xl border transition-all",
+                      failure.resolved 
+                        ? "bg-card/30 border-border/20" 
+                        : "bg-destructive/5 border-destructive/20"
+                    )}>
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          {failure.resolved ? (
+                            <CheckCircle2 className="w-5 h-5 text-chart-2" />
+                          ) : (
+                            <XCircle className="w-5 h-5 text-destructive" />
+                          )}
+                          <div>
+                            <p className="font-medium text-foreground">{failure.code}</p>
+                            <p className="text-sm text-muted-foreground/70 mt-0.5">{failure.message}</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs text-muted-foreground/50">{formatTime(failure.timestamp)}</p>
+                          {!failure.resolved && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="mt-2 h-7 text-xs text-chart-2 hover:text-chart-2 hover:bg-chart-2/10"
+                              onClick={() => setFailures(prev => prev.map(f => f.id === failure.id ? { ...f, resolved: true } : f))}
+                            >
+                              Resolver
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Console Tab */}
+          {activeTab === "console" && (
+            <div className="p-8 max-w-[1200px] mx-auto">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Console</h2>
+                  <p className="text-sm text-muted-foreground/60 mt-1">Logs detalhados do sistema</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setLogs([])} className="text-xs">
+                  Limpar
+                </Button>
+              </div>
+
+              <div className="rounded-xl bg-[#080c14] border border-border/20 overflow-hidden">
+                <div className="p-3 border-b border-border/10 flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-destructive/60" />
+                  <div className="w-3 h-3 rounded-full bg-chart-3/60" />
+                  <div className="w-3 h-3 rounded-full bg-chart-2/60" />
+                  <span className="ml-2 text-xs text-muted-foreground/40 font-mono">jarvis-console</span>
+                </div>
+                <ScrollArea className="h-[500px]">
+                  <div className="p-4 font-mono text-sm space-y-2">
+                    {logs.length === 0 ? (
+                      <div className="text-muted-foreground/30 flex items-center gap-2">
+                        <span className="terminal-cursor">_</span>
+                        Aguardando logs...
+                      </div>
+                    ) : (
+                      logs.map((log) => (
+                        <div key={log.id} className="flex items-start gap-3 terminal-line">
+                          <span className="text-muted-foreground/40 shrink-0 w-20">{formatTime(log.timestamp)}</span>
+                          <span className={cn(
+                            "shrink-0 w-16 font-semibold",
+                            log.level === "success" ? "text-chart-2" :
+                            log.level === "error" ? "text-destructive" :
+                            log.level === "warning" ? "text-chart-3" : "text-primary"
+                          )}>
+                            [{log.level.toUpperCase()}]
+                          </span>
+                          <span className="text-foreground/90">{log.code}</span>
+                          {log.detail && (
+                            <span className="text-muted-foreground/50">— {log.detail}</span>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </ScrollArea>
               </div>
             </div>
+          )}
 
-            {/* Orb */}
-            <JarvisOrb ctx={ctx} />
+          {/* Historico Tab */}
+          {activeTab === "historico" && (
+            <div className="p-8 max-w-[1000px] mx-auto">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Historico</h2>
+                  <p className="text-sm text-muted-foreground/60 mt-1">Eventos processados recentemente</p>
+                </div>
+                <div className="text-sm text-muted-foreground/50">
+                  {history.length} eventos
+                </div>
+              </div>
 
-            {/* Flow Panel — aparece quando ha flow ativo */}
-            {ctx.flow && activeTab === 'central' && (
-              <FlowPanel ctx={ctx} />
-            )}
-          </main>
-        )}
-
-        {/* Barra inferior */}
-        <BottomBar ctx={ctx} onEvent={handleEvent} />
-
-        {/* Status Bar */}
-        <StatusBar ctx={ctx} onReset={handleReset} />
+              {history.length === 0 ? (
+                <div className="text-center py-20">
+                  <History className="w-12 h-12 text-muted-foreground/20 mx-auto mb-4" />
+                  <p className="text-muted-foreground/50">Nenhum evento processado ainda</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {history.map((item) => (
+                    <div key={item.id} className="flex items-center gap-4 p-4 rounded-xl bg-card/40 border border-border/20">
+                      {item.success ? (
+                        <CheckCircle2 className="w-5 h-5 text-chart-2" />
+                      ) : (
+                        <XCircle className="w-5 h-5 text-destructive" />
+                      )}
+                      <div className="flex-1">
+                        <p className="font-medium text-foreground">{item.label}</p>
+                        <p className="text-xs text-muted-foreground/50 mt-0.5">{item.module}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-muted-foreground/40">{formatTime(item.time)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </main>
       </div>
     </div>
   )
 }
 
-function Particles() {
-  const dots = [
-    { x: 8,  y: 15, s: 2,   d: 3.1 }, { x: 82, y: 9,  s: 1.5, d: 4.7 },
-    { x: 45, y: 5,  s: 2.5, d: 2.8 }, { x: 93, y: 31, s: 1,   d: 6.2 },
-    { x: 5,  y: 60, s: 1.5, d: 3.9 }, { x: 78, y: 74, s: 1,   d: 5.4 },
-    { x: 31, y: 88, s: 2,   d: 4.1 }, { x: 62, y: 46, s: 1,   d: 2.5 },
-    { x: 89, y: 84, s: 1.5, d: 6.8 }, { x: 18, y: 42, s: 1,   d: 3.3 },
-    { x: 54, y: 94, s: 1,   d: 5.1 }, { x: 70, y: 21, s: 1.5, d: 4.4 },
-    { x: 38, y: 28, s: 1,   d: 3.7 }, { x: 24, y: 68, s: 1.5, d: 6.0 },
-    { x: 67, y: 12, s: 1,   d: 2.9 }, { x: 14, y: 82, s: 2,   d: 5.6 },
-  ]
+export default function JarvisPage() {
   return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {dots.map((d, i) => (
-        <span
-          key={i}
-          className="absolute rounded-full animate-twinkle"
-          style={{
-            left: `${d.x}%`,
-            top:  `${d.y}%`,
-            width:  d.s,
-            height: d.s,
-            background: i % 3 === 0 ? '#22d3ee' : '#3b82f6',
-            animationDuration: `${d.d}s`,
-            animationDelay: `${(i * 0.37) % d.d}s`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function IconBolt() {
-  return (
-    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-    </svg>
-  )
-}
-
-function IconPlay() {
-  return (
-    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  )
-}
-
-export default function Page() {
-  return (
-    <Suspense fallback={
-      <div className="flex h-screen items-center justify-center bg-background">
-        <span className="font-mono text-xs text-muted-foreground">
-          Inicializando<span className="animate-blink">_</span>
-        </span>
-      </div>
-    }>
-      <PainelInner />
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
+          <span className="font-mono text-xs text-muted-foreground">Inicializando painel 2...</span>
+        </div>
+      }
+    >
+      <JarvisPageContent />
     </Suspense>
   )
 }
