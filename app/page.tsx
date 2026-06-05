@@ -22,6 +22,8 @@ type EvolutionUiResult = {
   message?: string
   dryRun?: boolean
   preview?: string
+  phone?: string
+  flow?: string
   flags?: { enabled?: boolean; dryRun?: boolean; configured?: boolean }
   logs?: Array<{ code?: string; message?: string }>
 }
@@ -1073,31 +1075,56 @@ function JarvisPageContent() {
                           />
                         </label>
                         <div className="rounded-xl border border-border/20 bg-[#080c14] p-3 font-mono text-[11px]">
-                          <div className="mb-2 flex items-center gap-2 text-muted-foreground/50">
-                            <Terminal className="h-3.5 w-3.5" />
-                            resultado
+                          <div className="mb-2 flex items-center justify-between gap-2 text-muted-foreground/50">
+                            <span className="flex items-center gap-2">
+                              <MessageSquare className="h-3.5 w-3.5" />
+                              preview da mensagem
+                            </span>
+                            {evolutionResult && (
+                              <span
+                                className={cn(
+                                  "rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider",
+                                  evolutionResult.dryRun !== false
+                                    ? "border-chart-3/30 bg-chart-3/10 text-chart-3"
+                                    : "border-chart-2/30 bg-chart-2/10 text-chart-2"
+                                )}
+                              >
+                                {evolutionResult.dryRun !== false ? "Dry-run" : "Real"}
+                              </span>
+                            )}
                           </div>
                           {evolutionResult ? (
-                            <div className="space-y-1 text-foreground/80">
-                              <p className={cn(
-                                "font-semibold",
-                                evolutionResult.ok ? "text-chart-2" : "text-destructive"
-                              )}>{evolutionResult.code || "RESULT"} · {evolutionResult.message || "-"}</p>
-                              {evolutionResult.dryRun && (
-                                <p className="text-chart-3/80 text-[10px]">Dry-run ativo - nenhuma mensagem enviada</p>
-                              )}
-                              {evolutionResult.preview && (
-                                <div className="mt-2 p-2 rounded-lg bg-card/30 border border-border/20">
-                                  <p className="text-[10px] text-muted-foreground/50 mb-1">Preview da mensagem:</p>
-                                  <p className="whitespace-pre-wrap text-primary/90 leading-relaxed">{evolutionResult.preview}</p>
+                            <div className="space-y-2">
+                              {/* Metadados do envio */}
+                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground/60">
+                                {evolutionResult.flow && (
+                                  <span>flow: <span className="text-foreground/80">{evolutionResult.flow}</span></span>
+                                )}
+                                {evolutionResult.phone && (
+                                  <span>tel: <span className="text-foreground/80">{evolutionResult.phone}</span></span>
+                                )}
+                                <span className={evolutionResult.ok ? "text-chart-2" : "text-destructive"}>
+                                  {evolutionResult.code || "RESULT"}
+                                </span>
+                              </div>
+
+                              {/* Bolha de mensagem estilo WhatsApp */}
+                              {evolutionResult.preview ? (
+                                <div className="rounded-lg rounded-tl-sm border border-chart-2/20 bg-chart-2/5 p-3">
+                                  <p className="whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-foreground/90">
+                                    {evolutionResult.preview}
+                                  </p>
                                 </div>
+                              ) : (
+                                <p className="text-muted-foreground/50">{evolutionResult.message || "Sem preview"}</p>
                               )}
-                              {evolutionResult.logs?.slice(0, 2).map((entry, index) => (
-                                <p key={`${entry.code}-${index}`} className="text-muted-foreground/60">{entry.code}: {entry.message}</p>
-                              ))}
+
+                              {evolutionResult.dryRun !== false && (
+                                <p className="text-[10px] text-chart-3/70">Nenhuma mensagem enviada (dry-run ativo).</p>
+                              )}
                             </div>
                           ) : (
-                            <p className="text-muted-foreground/35">Aguardando teste...</p>
+                            <p className="text-muted-foreground/35">Selecione um fluxo e clique em simular para ver o preview.</p>
                           )}
                         </div>
                       </div>
