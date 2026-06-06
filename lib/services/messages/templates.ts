@@ -71,16 +71,70 @@ export function buildRenewalMessage(ctx: MessageContext = {}): string {
 }
 
 export function buildAccessActivatedMessage(ctx: MessageContext = {}): string {
+  const cliente = pick(ctx.cliente, ctx.clientName, 'cliente')
+  const app = pick(ctx.app, 'Aplicativo')
+  const plano = pick(ctx.plan, 'Mensal')
+  const validade = pick(ctx.vencimento)
+  const isXcloud = /x\s*cloud|xcloud/i.test(app)
+  const isSmart = /smart\s*(stb|up)/i.test(app)
+
+  // Smart STB / Smart UP: orientar DNS do catalogo + foto da rede se precisar
+  if (isSmart) {
+    return [
+      'Acesso ativado com sucesso! \u2705',
+      '',
+      `Cliente: ${cliente}`,
+      `App: ${app}`,
+      `Plano: ${plano}`,
+      validade ? `Validade: ${validade}` : null,
+      '',
+      'No seu aparelho, va em configuracoes de rede e ajuste o DNS:',
+      optional('DNS', pick(ctx.dns, ctx.host)) || 'DNS: confira no painel do app',
+      '',
+      'Se precisar, me envia uma foto da tela de rede da sua TV que eu te ajudo a configurar.',
+      '',
+      'Qualquer duvida, me chama aqui que eu te ajudo. \ud83c\udf7f',
+    ].filter(Boolean).join('\n')
+  }
+
+  // XCloud: nao tem usuario/senha, so RELOAD
+  if (isXcloud) {
+    return [
+      'Acesso ativado com sucesso! \u2705',
+      '',
+      `Cliente: ${cliente}`,
+      `Plano: ${plano}`,
+      validade ? `Validade: ${validade}` : null,
+      '',
+      'Seu acesso ja esta liberado.',
+      '',
+      'Abra o XCloud e clique em *RELOAD* ou *RECARREGAR* para atualizar a lista.',
+      '',
+      'Qualquer duvida, me chama aqui que eu te ajudo. \ud83c\udf7f',
+    ].filter(Boolean).join('\n')
+  }
+
+  // App comum: tem dados de acesso (usuario/senha/provider/codigo)
+  const usuario = pick(ctx.usuario, ctx.username)
+  const senha = pick(ctx.senha, ctx.password)
+  const providerOuCodigo = pick(ctx.codigo, ctx.code, ctx.host, ctx.dns)
   return [
-    'Acesso ativado com sucesso!',
+    'Acesso ativado com sucesso! \u2705',
     '',
-    optional('Cliente', pick(ctx.cliente, ctx.clientName)),
-    optional('Plano', pick(ctx.plan, ctx.app)),
-    optional('Validade', ctx.vencimento),
-    optional('App', ctx.app),
-    optional('Painel', pick(ctx.painel, ctx.panel)),
+    `Cliente: ${cliente}`,
+    `App: ${app}`,
+    `Plano: ${plano}`,
+    validade ? `Validade: ${validade}` : null,
     '',
-    'Aproveite sua assinatura Central Play Plus.',
+    'Dados de acesso:',
+    '',
+    providerOuCodigo || null,
+    usuario ? `Usuario: ${usuario}` : null,
+    senha ? `Senha: ${senha}` : null,
+    '',
+    'Abra o aplicativo, preencha os dados acima e aproveite.',
+    '',
+    'Qualquer duvida, me chama aqui que eu te ajudo. \ud83c\udf7f',
   ].filter(Boolean).join('\n')
 }
 
